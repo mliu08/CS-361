@@ -6,18 +6,18 @@
 # Author: Maggie Liu
 # Version: 1.0.0
 # Description: A web app that allows a user to choose a city, and then takes 
-#               EPA air quality data for that city and displays a historical
-#               trend. Users can have up to 3 trends on the same graph.
+#               air quality data for that city and displays a historical
+#               trend. Users can add multiple cities to the same trend.
 #              
 
 library(shiny)
 library(shiny.router)
 library(ggplot2)
-library(RAQSAPI)
+# library(RAQSAPI)
 
 
 # Landing page
-map_page <- div(
+new_search_page <- div(
     
     headerPanel("Choose a city from the map below"),
     
@@ -28,12 +28,40 @@ map_page <- div(
            your choice to see air quality trends from that area."),
         
         # map with pre-selected cities to choose from
-        jumbotron("Map Goes Here!", "<< Map with visual choices>> ", 
+        jumbotron("Map From Image Retrieval Service Goes Here!", 
+                  "<< Map with action buttons overlaid on ~5 cities >>", 
                   button=FALSE),
         
         # zip submission form
         textInput("zip", "Or, enter a 5-digit zip code:"), 
-        actionButton("submit", label = "Submit", icon = NULL, width = NULL)
+        actionButton("new_search", label = "Submit", icon = NULL, width = NULL)
+        
+        # TODO: data validation alert if not a zip, or not available in the db
+    )
+)
+
+# Page to add more cities
+add_page <- div(
+    
+    headerPanel("Choose another city from the map below"),
+    
+    mainPanel(
+        
+        # instruction text
+        h5("Choose another pre-selected city from the map, or enter the ZIP code
+        of your choice to see air quality trends from that area."),
+        p("TIP: Comparing more than 2 cities at once may make trends difficult
+           to read.", style ="font-size:10pt;"),
+        
+        # map with pre-selected cities to choose from
+        jumbotron("Map From Image Retrieval Service Goes Here!", 
+                  "<< Map with action buttons overlaid on ~5 cities, maybe
+                  with current selected location shown >>", 
+                  button=FALSE),
+        
+        # zip submission form
+        textInput("zip", "Or, enter a 5-digit zip code:"), 
+        actionButton("added_city", label = "Submit", icon = NULL, width = NULL)
         
         # TODO: data validation alert if not a zip, or not available in the db
     )
@@ -46,7 +74,8 @@ dash_page <- div(
     # Sidebar with a slider input for number of bins 
     sidebarLayout(
         sidebarPanel(
-            helpText("Move sliders to change the ranges on the graph!"),
+            helpText("Move sliders to change the ranges on the graph"),
+            br(),
             
             #TODO: range should update based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
@@ -57,26 +86,25 @@ dash_page <- div(
             sliderInput("aq_slide", "PM2.5",
                         min = 0,
                         max = 500,
-                        value = c(0, 500))
+                        value = c(0, 500)),
+            
+            actionButton("start_over", label = "New Search", icon = NULL),
+            actionButton("add_city", label = "Add City", icon = NULL)
         ),
         
-        # Display smoothed scatter plot
+        # Display plot
         mainPanel(
             plotOutput("aqPlot")
         )
     ),
-    
-    fluidRow(
-        actionButton("new", label = "Choose New City")
-    )
-    
    
 )
 
 # Router
 router <- make_router(
-    route("/", map_page),
-    route("trends", dash_page)
+    route("/", new_search_page),
+    route("trends", dash_page),
+    route("add-city", add_page)
 )
 
 
@@ -84,13 +112,7 @@ router <- make_router(
 ui <- fluidPage(
     theme = bslib::bs_theme(bootswatch = "flatly"),
     title = "Historical Air Quality Trends",
-    
-    # TODO: make this a conditional bar so pageflow is more constrained?
-    tags$nav(
-        tags$button(a(href = route_link("/"), "Home")),
-        tags$button(a(href = route_link("trends"), "Dashboard"))
-    ),
-    
+    fluid = TRUE,
     router$ui
 )
 
@@ -99,31 +121,73 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    observeEvent(input$submit,{
-        if (count < 2){
-            
-        }
+    # performs new search
+    observeEvent(input$new_search,{
+        # clear data frame
+        df <- data.frame()
+        
+        # get data based on input$zip // or add zip to a vector of zips?
+        
+        # go to the trend page
+        change_page("trends")
+    })
+    
+    # updates df with newly-requested city
+    observeEvent(input$added_city,{
+        # get new city data and add to data frame
+        
+        # new_data <- read.csv("data.csv) // make another call to service
+        
+        # cbind the new_data to the original data frame
+        
+        # go to the trend page
+        change_page("trends")
+    })
+    
+    # goes back to starting screen.
+    observeEvent(input$start_over,{
+        showModal(
+            modalDialog(title = "Caution",
+            "Starting a new search will clear all existing data.",
+            footer = tagList(
+                modalButton("Cancel"),
+                actionButton("confirm_new", "Confirm new search")) 
+            )
+        )
+    })
+    
+    # goes to the add-a-city screen
+    observeEvent(input$confirm_new,{
+        change_page("/")
+        removeModal()
+    })
+    
+    # goes to the add-a-city screen
+    observeEvent(input$add_city,{
+        change_page("add-city")
     })
 
+    
     output$aqPlot <- renderPlot({
         # fetch data from text file, either:
-        #   AQS based on location data provided to the UI
+        #   AQS based on location data provided to the UI, or
         #   some other, faster source
         
-        # TODO: replace dummy data file
+        # TODO: replace dummy data file with call to microservice
         df <- read.csv("dummydata.csv")
         colnames(df) <- c('Date', 'PM2.5')
-        df$Date <- as.Date(df$Date, forma = "%m/%d/%y")
+        df$Date <- as.Date(df$Date, format = "%m/%d/%y")
         
         # TODO: do any aggregation to make it more readable?
         
         # render the plot with the data frame
         ggplot(df, aes(Date, PM2.5)) + 
             geom_point() +
-            labs(x = "Date", y = "PM2.5", title = "Air quality trend for - CITY NAME") +
+            labs(x = "Date", y = "PM2.5", 
+                 title = "Air quality trend for - CITY NAME") +
             scale_x_date(date_labels = "%b-%Y")
         
-        #TODO: add axis labels, dynamic title, connect sliders to axes
+        #TODO: add dynamic labels & title, connect sliders to axes
         
     }, res = 96)
 }
