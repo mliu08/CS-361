@@ -16,7 +16,7 @@ library(ggplot2)
 # library(RAQSAPI)
 
 
-# Landing page
+# Initial page - starts a new search
 new_search_page <- div(
     
     headerPanel("Choose a city from the map below"),
@@ -26,6 +26,8 @@ new_search_page <- div(
         # instruction text
         h5("Choose a pre-selected city from the map, or enter the ZIP code of 
            your choice to see air quality trends from that area."),
+        p("TIP: data for every ZIP code might not be available", 
+          style ="font-size:10pt;"),
         
         # map with pre-selected cities to choose from
         jumbotron("Map From Image Retrieval Service Goes Here!", 
@@ -40,7 +42,7 @@ new_search_page <- div(
     )
 )
 
-# Page to add more cities
+# Page to add more cities to existing trend
 add_page <- div(
     
     headerPanel("Choose another city from the map below"),
@@ -61,7 +63,8 @@ add_page <- div(
         
         # zip submission form
         textInput("zip", "Or, enter a 5-digit zip code:"), 
-        actionButton("added_city", label = "Submit", icon = NULL, width = NULL)
+        actionButton("added_city", label = "Submit", icon = NULL, width = NULL),
+        actionButton("trend", label = "Go Back", icon = NULL, width = NULL)
         
         # TODO: data validation alert if not a zip, or not available in the db
     )
@@ -121,6 +124,24 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
+    #
+    # --- Data pull ---
+    #
+    # fetch data from text file, either:
+    #   AQS based on location data provided to the UI, or
+    #   some other, faster source
+    
+    # TODO: replace dummy data file with call to microservice
+    df <- read.csv("dummydata.csv")
+    colnames(df) <- c('Date', 'PM2.5')
+    df$Date <- as.Date(df$Date, "%m/%d/%Y")
+    
+    # TODO: do any aggregation to make it more readable?
+    
+    #
+    # --- EVENT HANDLERS ---
+    #
+    
     # performs new search
     observeEvent(input$new_search,{
         # clear data frame
@@ -166,30 +187,32 @@ server <- function(input, output, session) {
     observeEvent(input$add_city,{
         change_page("add-city")
     })
-
     
+    # goes to the trend screen
+    observeEvent(input$trend,{
+        change_page("trends")
+    })
+    
+    
+    #
+    # --- Generate Output ---
+    #
     output$aqPlot <- renderPlot({
-        # fetch data from text file, either:
-        #   AQS based on location data provided to the UI, or
-        #   some other, faster source
-        
-        # TODO: replace dummy data file with call to microservice
-        df <- read.csv("dummydata.csv")
-        colnames(df) <- c('Date', 'PM2.5')
-        df$Date <- as.Date(df$Date, format = "%m/%d/%y")
-        
-        # TODO: do any aggregation to make it more readable?
         
         # render the plot with the data frame
         ggplot(df, aes(Date, PM2.5)) + 
             geom_point() +
             labs(x = "Date", y = "PM2.5", 
-                 title = "Air quality trend for - CITY NAME") +
-            scale_x_date(date_labels = "%b-%Y")
+                 title = "Air quality trend for - Chosen ZIP Codes") +
+            scale_x_date(date_labels = "%b-%Y") +
+            xlim(input$time_slide) +
+            ylim(input$aq_slide)
         
-        #TODO: add dynamic labels & title, connect sliders to axes
+        #TODO: add dynamic legend & title
         
     }, res = 96)
+    
+
 }
 
 shinyApp(ui = ui, server = server)
