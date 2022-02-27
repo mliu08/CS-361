@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Albuquerque
 Atlanta
 Austin
@@ -53,4 +54,61 @@ Staten Island
 Tallahassee
 The Bronx
 Tucson
+=======
+Albuquerque
+Atlanta
+Austin
+Baltimore
+Boise
+Boston
+Brooklyn
+Charlotte
+Chicago
+Columbia
+Columbus
+Dallas
+Denver
+Detroit
+El Paso
+Fort Worth
+Fresno
+Hartford
+Honolulu
+Houston
+Indianapolis
+Jackson
+Jacksonville
+Las Vegas
+Little Rock
+Los Ángeles
+Madison
+Manhattan
+Memphis
+Miami
+Milwaukee
+Nashville
+Oakland
+Oklahoma City
+Philadelphia
+Phoenix
+Portland
+Providence
+Queens
+Raleigh
+Richmond
+Sacramento
+Saint Paul
+Salem
+Salt Lake City
+San Antonio
+San Diego
+San Francisco
+San José
+Seattle
+Springfield
+Staten Island
+Tallahassee
+The Bronx
+Tucson
+>>>>>>> 7a00c6514d0c6d1bd07e981dd16d4dca213d50fe
 Washington D.C.
