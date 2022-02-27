@@ -4,7 +4,7 @@
 # Winter 2022
 #
 # Author: Maggie Liu
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: A web app that allows a user to choose a city, and then takes 
 #               air quality data for that city and displays a historical
 #               trend. Users can add multiple cities to the same trend.
@@ -12,8 +12,10 @@
 
 library(shiny)
 library(shiny.router)
+library(shinyLP)
 library(ggplot2)
-# library(RAQSAPI)
+#library(rzmq)
+library(reticulate)
 
 
 # Initial page - starts a new search
@@ -82,14 +84,14 @@ dash_page <- div(
             
             #TODO: range should update based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
-                        min = as.Date("2015-01-01"),
+                        min = as.Date("2018-12-31"),
                         max = as.Date("2021-01-01"),
-                        value = c(as.Date("2015-01-01"), as.Date("2021-01-01")), 
+                        value = c(as.Date("2018-12-31"), as.Date("2021-01-01")), 
                         timeFormat = "%F", dragRange = TRUE),
             sliderInput("aq_slide", "PM2.5",
                         min = 0,
-                        max = 500,
-                        value = c(0, 500)),
+                        max = 300,
+                        value = c(0, 300)),
             
             actionButton("start_over", label = "New Search", icon = NULL),
             actionButton("add_city", label = "Add City", icon = NULL)
@@ -99,8 +101,7 @@ dash_page <- div(
         mainPanel(
             plotOutput("aqPlot")
         )
-    ),
-   
+    )
 )
 
 # Router
@@ -113,7 +114,7 @@ router <- make_router(
 
 # UI
 ui <- fluidPage(
-    theme = bslib::bs_theme(bootswatch = "flatly"),
+    theme = bslib::bs_theme(bootswatch = "yeti"),
     title = "Historical Air Quality Trends",
     fluid = TRUE,
     router$ui
@@ -124,40 +125,42 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    #
-    # --- Data pull ---
-    #
-    # fetch data from text file, either:
-    #   AQS based on location data provided to the UI, or
-    #   some other, faster source
+    df <- read.csv("pm25py.csv")
+    colnames(df) <- c('Index', 'Date', 'PM2.5')
+    df$Date <- as.Date(df$Date)
     
-    # TODO: replace dummy data file with call to microservice
-    df <- read.csv("dummydata.csv")
-    colnames(df) <- c('Date', 'PM2.5')
-    df$Date <- as.Date(df$Date, "%m/%d/%Y")
     
-    # TODO: do any aggregation to make it more readable?
-    
-    #
-    # --- EVENT HANDLERS ---
-    #
-    
+#
+# --- EVENT HANDLERS ---
+#
     # performs new search
     observeEvent(input$new_search,{
-        # clear data frame
-        df <- data.frame()
+        #TODO: verify zip not empty / modal for if it is
         
-        # get data based on input$zip // or add zip to a vector of zips?
+        #
+        # --- Data pull ---
+        #
+        #   1) Write desired ZIP to 'historic_aqi.txt';
+        #   2) Run microservice 'get_historic_pm25.py';
+        #   3) Read data from 'pm25py.csv'
+        #
+        #   Source: AQICN database on dbnomics
+        #
+        # TODO: make data pull a module? gave 'passing function as global data' error
+        # TODO: use rzmq instead? read up on ZeroMQ
         
-        # go to the trend page
-        change_page("trends")
+        writeLines(input$zip, "historic_aqi.txt")
+       # reticulate::source_python("get_historic_pm25.py")
+        
+        
+        
+        change_page("trends")           # go to the trend page
     })
     
     # updates df with newly-requested city
     observeEvent(input$added_city,{
-        # get new city data and add to data frame
-        
-        # new_data <- read.csv("data.csv) // make another call to service
+        # fetch data
+        writeLines(input$zip, "historic_aqi.txt")
         
         # cbind the new_data to the original data frame
         
@@ -177,9 +180,10 @@ server <- function(input, output, session) {
         )
     })
     
-    # goes to the add-a-city screen
+    # goes to the new search screen
     observeEvent(input$confirm_new,{
         change_page("/")
+        # TODO: update slider min/max here
         removeModal()
     })
     
@@ -193,15 +197,15 @@ server <- function(input, output, session) {
         change_page("trends")
     })
     
-    
-    #
-    # --- Generate Output ---
-    #
+    # TODO: do any aggregation to make it more readable? 
+#
+# --- Generate Plot ---
+#
     output$aqPlot <- renderPlot({
         
         # render the plot with the data frame
         ggplot(df, aes(Date, PM2.5)) + 
-            geom_point() +
+            geom_line() +
             labs(x = "Date", y = "PM2.5", 
                  title = "Air quality trend for - Chosen ZIP Codes") +
             scale_x_date(date_labels = "%b-%Y") +
@@ -211,8 +215,6 @@ server <- function(input, output, session) {
         #TODO: add dynamic legend & title
         
     }, res = 96)
-    
-
 }
 
 shinyApp(ui = ui, server = server)
