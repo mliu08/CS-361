@@ -137,10 +137,6 @@ server <- function(input, output, session) {
     #
     # TODO: make data pull a module
     
-    #df <- read.csv("pm25py.csv")
-    #colnames(df) <- c('Index', 'Date', 'PM2.5')
-    #df$Date <- as.Date(df$Date)
-    
 #
 # --- EVENT HANDLERS ---
 #
@@ -171,18 +167,17 @@ server <- function(input, output, session) {
                                     modalButton("Ok."))
                     )
                 )
-            } else{
+            } else {
                 df <- read.csv("pm25py.csv")
-                colnames(df) <- c('Index', 'Date', paste(input$new_search,' PM2.5'))
+                colnames(df) <- c('Index', 'Date', as.character(confirm_request))
                 df$Date <- as.Date(df$Date)
-                
                 output$aqPlot <- renderPlot({
                     
                     # render the plot with the data frame
-                    ggplot(df, aes()) + 
+                    ggplot(data = df, aes(Date, as.name(df[3]))) + 
                         geom_line() +
                         labs(x = "Date", y = "PM2.5", 
-                             title = "Air quality trend for - Chosen ZIP Codes") +
+                             title = paste("Air quality trend for", names(df)[3])) +
                         scale_x_date(date_labels = "%b-%Y") +
                         xlim(input$time_slide) +
                         ylim(input$aq_slide)
@@ -200,11 +195,23 @@ server <- function(input, output, session) {
     
     # updates df with newly-requested city
     observeEvent(input$added_city,{
-        # check if input blank
+        
         if (input$add_zip == ""){
+            
+            # check if input blank
             showModal(
                 modalDialog(title = "Error",
                             "Please enter a zip code or city name, or choose a city from the map.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else if (ncol(df) == 5){
+            
+            # check if 3 cities already trended
+            showModal(
+                modalDialog(title = "Error",
+                            "Only 3 cities can be trended at one time.",
                             footer = tagList(
                                 modalButton("Ok."))
                 )
@@ -227,12 +234,12 @@ server <- function(input, output, session) {
                 )
             } else{
                 df_add <- read.csv("pm25py.csv")
+                colnames(df_add) <- c('Index', 'Date', confirm_request)
                 df <- cbind(df, df_add[3])
-                
                 output$aqPlot <- renderPlot({
                     
                     # render the plot with the data frame
-                    ggplot(df, aes()) + 
+                    ggplot(df, aes(x = Date, y = value, color=variable)) + 
                         geom_line() +
                         labs(x = "Date", y = "PM2.5", 
                              title = "Air quality trend for - Chosen ZIP Codes") +
@@ -276,21 +283,6 @@ server <- function(input, output, session) {
     
     # goes to the trend screen
     observeEvent(input$trend,{
-        
-        output$aqPlot <- renderPlot({
-            
-            # render the plot with the data frame
-            ggplot(df, aes()) + 
-                geom_line() +
-                labs(x = "Date", y = "PM2.5", 
-                     title = "Air quality trend for - Chosen ZIP Codes") +
-                scale_x_date(date_labels = "%b-%Y") +
-                xlim(input$time_slide) +
-                ylim(input$aq_slide)
-            
-            #TODO: add dynamic legend & title
-            
-        }, res = 96)
         change_page("trends")
     })
     
