@@ -4,7 +4,7 @@
 # Winter 2022
 #
 # Author: Maggie Liu
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: A web app that allows a user to choose a city, and then takes 
 #               air quality data for that city and displays a historical
 #               trend. Users can add multiple cities to the same trend.
@@ -27,21 +27,26 @@ new_search_page <- div(
     mainPanel(
         
         # instruction text
-        h5("Choose a pre-selected city from the map, or enter the ZIP code of 
-           your choice to see air quality trends from that area."),
-        p("TIP: data for every ZIP code might not be available", 
+        h5("Choose a pre-selected city from the map, or enter the name or ZIP 
+           code of a city of your choice to see air quality trends from that 
+           area."),
+        p("TIP: not every city has data available", 
           style ="font-size:10pt;"),
         
+        br(),
+        
         # map with pre-selected cities to choose from
-        jumbotron("Map From Image Retrieval Service Goes Here!", 
-                  "<< Map with action buttons overlaid on ~5 cities >>", 
-                  button=FALSE),
+        imageOutput("map_image"),
         
-        # zip submission form
-        textInput("zip", "Or, enter a 5-digit zip code:"), 
-        actionButton("new_search", label = "Submit", icon = NULL, width = NULL)
+        br(),
+        br(),
         
-        # TODO: data validation alert if not a zip, or not available in the db
+        fluidRow(
+            # zip submission form
+            column(width = 5, textInput("zip", "Or, enter your own city / 5-digit zip code:")), 
+            column(7, style = "margin-top:30px;", 
+                   actionButton("new_search", label = "Submit", icon = NULL, width = NULL))
+        )
     )
 )
 
@@ -68,8 +73,6 @@ add_page <- div(
         textInput("add_zip", "Or, enter a 5-digit zip code:"), 
         actionButton("added_city", label = "Submit", icon = NULL, width = NULL),
         actionButton("trend", label = "Go Back", icon = NULL, width = NULL)
-        
-        # TODO: data validation alert if not a zip, or not available in the db
     )
 )
 
@@ -126,6 +129,10 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
+    output$map_image <- renderImage({
+        list(src = "stock USA map.png", contentType = 'image/png')
+    })
+    
     #
     # --- Data pull ---
     #
@@ -174,11 +181,12 @@ server <- function(input, output, session) {
                 output$aqPlot <- renderPlot({
                     
                     # render the plot with the data frame
-                    ggplot(data = df, aes(Date, as.name(df[3]))) + 
+                    ggplot(data = df, aes(Date, as.character(confirm_request))) + 
                         geom_line() +
                         labs(x = "Date", y = "PM2.5", 
                              title = paste("Air quality trend for", names(df)[3])) +
                         scale_x_date(date_labels = "%b-%Y") +
+                        scale_y_continuous()
                         xlim(input$time_slide) +
                         ylim(input$aq_slide)
                     
@@ -239,11 +247,12 @@ server <- function(input, output, session) {
                 output$aqPlot <- renderPlot({
                     
                     # render the plot with the data frame
-                    ggplot(df, aes(x = Date, y = value, color=variable)) + 
+                    ggplot(df, aes(x = Date, y = names(df[3:4]), color=variable)) + 
                         geom_line() +
                         labs(x = "Date", y = "PM2.5", 
                              title = "Air quality trend for - Chosen ZIP Codes") +
                         scale_x_date(date_labels = "%b-%Y") +
+                        scale_y_continuous() +
                         xlim(input$time_slide) +
                         ylim(input$aq_slide)
                     
