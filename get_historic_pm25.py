@@ -38,10 +38,13 @@ if city.capitalize() in db_cities:
 
     # Convert df to csv and write
     df = pandas.DataFrame.to_csv(df, line_terminator='\r')
-else:
-    # Write an empty csv if the request was not in the database
-    df = ""
 
-with open('pm25py.csv','w') as outfile:
+    with open('pm25py.csv','w') as outfile:
         outfile.write(df)
+
+else:
+    # Write an an error message to the request file if the request was not in the database
+    with open('historic_aqi.txt', 'w') as outfile:
+        outfile.write("Location not found.")
+
 outfile.close()

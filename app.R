@@ -14,10 +14,8 @@ library(shiny)
 library(shiny.router)
 library(shinyLP)
 library(ggplot2)
-#library(rzmq)
 library(reticulate)
 library(Rcpp)
-#reticulate::py_install("subprocess")
 subprocess <- reticulate::import("subprocess")
 
 
@@ -85,7 +83,7 @@ dash_page <- div(
             helpText("Move sliders to change the ranges on the graph"),
             br(),
             
-            #TODO: range should update based on limits in data file unless doing a standard pull
+            #TODO: update range based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
                         min = as.Date("2018-12-31"),
                         max = as.Date("2021-01-01"),
@@ -128,53 +126,128 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    df <- read.csv("pm25py.csv")
-    colnames(df) <- c('Index', 'Date', 'PM2.5')
-    df$Date <- as.Date(df$Date)
+    #
+    # --- Data pull ---
+    #
+    #   1) Write desired ZIP to 'historic_aqi.txt';
+    #   2) Run microservice 'get_historic_pm25.py';
+    #   3) Read data from 'pm25py.csv'
+    #
+    #   Source: AQICN database on dbnomics
+    #
+    # TODO: make data pull a module
+    
+    #df <- read.csv("pm25py.csv")
+    #colnames(df) <- c('Index', 'Date', 'PM2.5')
+    #df$Date <- as.Date(df$Date)
     
 #
 # --- EVENT HANDLERS ---
 #
     # performs new search
     observeEvent(input$new_search,{
-        #TODO: verify zip not empty / modal for if it is
-        
-        #
-        # --- Data pull ---
-        #
-        #   1) Write desired ZIP to 'historic_aqi.txt';
-        #   2) Run microservice 'get_historic_pm25.py';
-        #   3) Read data from 'pm25py.csv'
-        #
-        #   Source: AQICN database on dbnomics
-        #
-        # TODO: make data pull a module? gave 'passing function as global data' error
-        # TODO: use rzmq instead? read up on ZeroMQ
-        
-        writeLines(input$zip, "historic_aqi.txt")
-        subprocess$run('py .\\get_historic_pm25.py')
-        
-        df <- read.csv("pm25py.csv")
-        colnames(df) <- c('Index', 'Date', 'PM2.5')
-        df$Date <- as.Date(df$Date)
-        
-        change_page("trends")           # go to the trend page
+        # check if input blank
+        if (input$zip == ""){
+            showModal(
+                modalDialog(title = "Error",
+                            "Please enter a zip code or city name, or choose a city from the map.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else {
+            
+            # fetch data
+            writeLines(as.character(input$zip), "historic_aqi.txt")
+            subprocess$run('py .\\get_historic_pm25.py')
+            
+            # Check if the request was successful
+            confirm_request <- readLines("historic_aqi.txt")
+            if (confirm_request == "Location not found."){
+                showModal(
+                    modalDialog(title = "Sorry!",
+                                "No data found for that location. Please try another.",
+                                footer = tagList(
+                                    modalButton("Ok."))
+                    )
+                )
+            } else{
+                df <- read.csv("pm25py.csv")
+                colnames(df) <- c('Index', 'Date', paste(input$new_search,' PM2.5'))
+                df$Date <- as.Date(df$Date)
+                
+                output$aqPlot <- renderPlot({
+                    
+                    # render the plot with the data frame
+                    ggplot(df, aes()) + 
+                        geom_line() +
+                        labs(x = "Date", y = "PM2.5", 
+                             title = "Air quality trend for - Chosen ZIP Codes") +
+                        scale_x_date(date_labels = "%b-%Y") +
+                        xlim(input$time_slide) +
+                        ylim(input$aq_slide)
+                    
+                    #TODO: add dynamic legend & title
+                    
+                }, res = 96)
+                
+                # go to the trend page
+                change_page("trends")
+                
+            }
+        }
     })
     
     # updates df with newly-requested city
     observeEvent(input$added_city,{
-        # fetch data
-        writeLines(input$add_zip, "historic_aqi.txt")
+        # check if input blank
+        if (input$add_zip == ""){
+            showModal(
+                modalDialog(title = "Error",
+                            "Please enter a zip code or city name, or choose a city from the map.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else {
         
-        # cbind the new_data to the original data frame
-        # TODO: handle if the file is empty and initiate a modal, choose again
-        subprocess$run('py .\\get_historic_pm25.py')
-        df_add <- read.csv("pm25py.csv")
-        colnames(df_add) <- c('Index', 'Date', 'NewPM2.5')
-        df <- cbind(df, df_add$NewPM2.5)
-        
-        # go to the trend page
-        change_page("trends")
+            # fetch data
+            writeLines(as.character(input$add_zip), "historic_aqi.txt")
+            subprocess$run('py .\\get_historic_pm25.py')
+            
+            # Check if the request was successful
+            confirm_request <- readLines("historic_aqi.txt")
+            if (confirm_request == "Location not found."){
+                showModal(
+                    modalDialog(title = "Sorry!",
+                                "No data found for that location. Please try another.",
+                                footer = tagList(
+                                    modalButton("Ok."))
+                    )
+                )
+            } else{
+                df_add <- read.csv("pm25py.csv")
+                df <- cbind(df, df_add[3])
+                
+                output$aqPlot <- renderPlot({
+                    
+                    # render the plot with the data frame
+                    ggplot(df, aes()) + 
+                        geom_line() +
+                        labs(x = "Date", y = "PM2.5", 
+                             title = "Air quality trend for - Chosen ZIP Codes") +
+                        scale_x_date(date_labels = "%b-%Y") +
+                        xlim(input$time_slide) +
+                        ylim(input$aq_slide)
+                    
+                    #TODO: add dynamic legend & title
+                    
+                }, res = 96)
+                
+                # go to the trend page
+                change_page("trends")
+            }
+        }
     })
     
     # goes back to starting screen.
@@ -203,6 +276,21 @@ server <- function(input, output, session) {
     
     # goes to the trend screen
     observeEvent(input$trend,{
+        
+        output$aqPlot <- renderPlot({
+            
+            # render the plot with the data frame
+            ggplot(df, aes()) + 
+                geom_line() +
+                labs(x = "Date", y = "PM2.5", 
+                     title = "Air quality trend for - Chosen ZIP Codes") +
+                scale_x_date(date_labels = "%b-%Y") +
+                xlim(input$time_slide) +
+                ylim(input$aq_slide)
+            
+            #TODO: add dynamic legend & title
+            
+        }, res = 96)
         change_page("trends")
     })
     
@@ -210,20 +298,7 @@ server <- function(input, output, session) {
 #
 # --- Generate Plot ---
 #
-    output$aqPlot <- renderPlot({
-        
-        # render the plot with the data frame
-        ggplot(df, aes(Date, PM2.5)) + 
-            geom_line() +
-            labs(x = "Date", y = "PM2.5", 
-                 title = "Air quality trend for - Chosen ZIP Codes") +
-            scale_x_date(date_labels = "%b-%Y") +
-            xlim(input$time_slide) +
-            ylim(input$aq_slide)
-        
-        #TODO: add dynamic legend & title
-        
-    }, res = 96)
+    
 }
 
 shinyApp(ui = ui, server = server)
