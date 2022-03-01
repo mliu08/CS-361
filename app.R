@@ -12,8 +12,8 @@
 
 library(shiny)
 library(shiny.router)
-library(shinyLP)
 library(ggplot2)
+library(plotly)
 library(reticulate)
 library(Rcpp)
 subprocess <- reticulate::import("subprocess")
@@ -36,7 +36,7 @@ new_search_page <- div(
         br(),
         
         # map with pre-selected cities to choose from
-        imageOutput("map_image"),
+        imageOutput("map_image_initial"),
         
         br(),
         br(),
@@ -63,11 +63,13 @@ add_page <- div(
         p("TIP: Comparing more than 2 cities at once may make trends difficult
            to read.", style ="font-size:10pt;"),
         
+        br(),
+        
         # map with pre-selected cities to choose from
-        jumbotron("Map From Image Retrieval Service Goes Here!", 
-                  "<< Map with action buttons overlaid on ~5 cities, maybe
-                  with current selected location shown >>", 
-                  button=FALSE),
+        imageOutput("map_image_new"),
+        
+        br(),
+        br(),
         
         # zip submission form
         textInput("add_zip", "Or, enter a 5-digit zip code:"), 
@@ -89,8 +91,8 @@ dash_page <- div(
             #TODO: update range based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
                         min = as.Date("2018-12-31"),
-                        max = as.Date("2021-01-01"),
-                        value = c(as.Date("2018-12-31"), as.Date("2021-01-01")), 
+                        max = as.Date("2022-01-01"),
+                        value = c(as.Date("2018-12-31"), as.Date("2022-01-01")), 
                         timeFormat = "%F", dragRange = TRUE),
             sliderInput("aq_slide", "PM2.5",
                         min = 0,
@@ -129,8 +131,12 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    output$map_image <- renderImage({
-        list(src = "stock USA map.png", contentType = 'image/png')
+    output$map_image_initial <- renderImage({
+        list(src = "stock USA map.png", contentType = 'image/png', deleteFIle=FALSE)
+    })
+    
+    output$map_image_new <- renderImage({
+        list(src = "stock USA map.png", contentType = 'image/png',  deleteFIle=FALSE)
     })
     
     #
@@ -174,19 +180,26 @@ server <- function(input, output, session) {
                                     modalButton("Ok."))
                     )
                 )
+            } else if (confirm_request == "Entry not recognized. Please check for typos."){
+                showModal(
+                    modalDialog(title = "Sorry!",
+                                "Entry not recognized. Please check for typos.",
+                                footer = tagList(
+                                    modalButton("Ok."))
+                    )
+                )
             } else {
-                df <- read.csv("pm25py.csv")
-                colnames(df) <- c('Index', 'Date', as.character(confirm_request))
+                df_raw <- read.csv("pm25py.csv")
+                df <- df_raw[2:3]
+                colnames(df) <- c('Date', 'City1')  # as.character(confirm_request)
                 df$Date <- as.Date(df$Date)
                 output$aqPlot <- renderPlot({
                     
                     # render the plot with the data frame
-                    ggplot(data = df, aes(Date, as.character(confirm_request))) + 
+                    ggplot(df, aes(Date, City1)) + 
                         geom_line() +
-                        labs(x = "Date", y = "PM2.5", 
-                             title = paste("Air quality trend for", names(df)[3])) +
+                        labs(x = "Date", y = "PM2.5", title = "Air quality trend for City 1") +
                         scale_x_date(date_labels = "%b-%Y") +
-                        scale_y_continuous()
                         xlim(input$time_slide) +
                         ylim(input$aq_slide)
                     
@@ -204,8 +217,7 @@ server <- function(input, output, session) {
     # updates df with newly-requested city
     observeEvent(input$added_city,{
         
-        if (input$add_zip == ""){
-            
+        if (input$add_zip == "") {
             # check if input blank
             showModal(
                 modalDialog(title = "Error",
@@ -214,8 +226,7 @@ server <- function(input, output, session) {
                                 modalButton("Ok."))
                 )
             )
-        } else if (ncol(df) == 5){
-            
+        } else if (ncol(df) == 4) {
             # check if 3 cities already trended
             showModal(
                 modalDialog(title = "Error",
@@ -225,7 +236,6 @@ server <- function(input, output, session) {
                 )
             )
         } else {
-        
             # fetch data
             writeLines(as.character(input$add_zip), "historic_aqi.txt")
             subprocess$run('py .\\get_historic_pm25.py')
@@ -240,25 +250,71 @@ server <- function(input, output, session) {
                                     modalButton("Ok."))
                     )
                 )
+            } else if (confirm_request == "Entry not recognized. Please check for typos."){
+                showModal(
+                    modalDialog(title = "Sorry!",
+                                "Entry not recognized. Please check for typos.",
+                                footer = tagList(
+                                    modalButton("Ok."))
+                    )
+                )
             } else{
                 df_add <- read.csv("pm25py.csv")
-                colnames(df_add) <- c('Index', 'Date', confirm_request)
-                df <- cbind(df, df_add[3])
-                output$aqPlot <- renderPlot({
+                
+                # Render the plot for 2 cities
+                if (ncol(df) == 2){
+                    colnames(df_add) <- c('Index', 'Date', 'City 2')
+                    df <- cbind(df, df_add[3])
                     
-                    # render the plot with the data frame
-                    ggplot(df, aes(x = Date, y = names(df[3:4]), color=variable)) + 
-                        geom_line() +
-                        labs(x = "Date", y = "PM2.5", 
-                             title = "Air quality trend for - Chosen ZIP Codes") +
-                        scale_x_date(date_labels = "%b-%Y") +
-                        scale_y_continuous() +
-                        xlim(input$time_slide) +
-                        ylim(input$aq_slide)
+                    # reshape dataframe to be able to plot two columns
+                    df_2 <- data.frame(x = df$Date,
+                                       y = c(df$City1, df$City2),
+                                       group = c(rep("City1", nrow(df)),
+                                                 rep("City2", nrow(df))))
                     
-                    #TODO: add dynamic legend & title
+                    head(df_2)
                     
-                }, res = 96)
+                    
+                    output$aqPlot <- renderPlot({
+                        # render the plot with the data frame
+                        ggplot(df_2, aes(x, y, col = group, color=variable)) + 
+                            geom_line() +
+                            labs(x = "Date", y = "PM2.5", 
+                                 title = "Air quality trend for - Chosen Cities") +
+                            scale_x_date(date_labels = "%b-%Y") +
+                            xlim(input$time_slide) +
+                            ylim(input$aq_slide)
+                        
+                        
+                    }, res = 96)
+
+                    
+                } else {
+                 # Render the plot for 3 cities  
+                    colnames(df_add) <- c('Index', 'Date', 'City 3')
+                    df <- cbind(df, df_add[3])
+                    
+                    # reshape dataframe to be able to plot two columns
+                    df_3 <- data.frame(x = df$Date,
+                                       y = c(df$City1, df$City2, df$City3),
+                                       group = c(rep("City1", nrow(df)),
+                                                 rep("City2", nrow(df)),
+                                                 rep("City3", nrow(df))))
+                    head(df_3)
+                    
+                    output$aqPlot <- renderPlot({
+                        # render the plot with the data frame
+                        ggplot(df_3, aes(x, y, col = group, color=variable)) + 
+                            geom_line() +
+                            labs(x = "Date", y = "PM2.5", 
+                                 title = "Air quality trend for - Chosen Cities") +
+                            scale_x_date(date_labels = "%b-%Y") +
+                            xlim(input$time_slide) +
+                            ylim(input$aq_slide)
+                        
+                        
+                    }, res = 96)
+                }
                 
                 # go to the trend page
                 change_page("trends")

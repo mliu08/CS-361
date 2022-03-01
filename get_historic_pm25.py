@@ -18,33 +18,40 @@ with open('historic_aqi.txt', 'r', encoding='UTF8') as infile:
     location = infile.readline()
 
 # Convert to city name in lowercase. 
-locator = geocoders.Nominatim(user_agent="historic_aqi_app")    
-city_county = locator.geocode(location, country_codes="us").address             # geocode returns City, County, State, Country. Only want city.
-city = city_county.split(",")[0].lower()      
-
+locator = geocoders.Nominatim(user_agent="historic_aqi_app") 
+search =  locator.geocode(location, country_codes="us")
 infile.close()
 
-# validate city against the 57 in the database
-db_cities = []
-with open('cities.txt', 'r', encoding='UTF8') as infile:
-    db_cities = infile.read().splitlines()
+# Only continue if the text provided was a real place
+if search is not None:
+    city_county = search.address                                    # geocode returns City, County, State, Country. Only want city.
+    city = city_county.split(",")[0].lower()      
 
-if city.capitalize() in db_cities:
-    fetch_code = 'AQICN/AQI/US.' + city + '.pm25.median'
+    # validate city against the 57 in the database
+    db_cities = []
+    with open('cities.txt', 'r', encoding='UTF8') as infile:
+        db_cities = infile.read().splitlines()
 
-    # Acquire data and remove unnecessary columns
-    df = dbnomics.fetch_series(fetch_code)
-    df = df[["original_period", "original_value"]]
+    if city.capitalize() in db_cities:
+        fetch_code = 'AQICN/AQI/US.' + city + '.pm25.median'
 
-    # Convert df to csv and write
-    df = pandas.DataFrame.to_csv(df, line_terminator='\r')
+        # Acquire data and remove unnecessary columns
+        df = dbnomics.fetch_series(fetch_code)
+        df = df[["original_period", "original_value"]]
 
-    with open('pm25py.csv','w') as outfile:
-        outfile.write(df)
+        # Convert df to csv and write
+        df = pandas.DataFrame.to_csv(df, line_terminator='\r')
+
+        with open('pm25py.csv','w') as outfile:
+            outfile.write(df)
+
+    else:
+        # Write an an error message to the request file if the request was not in the database
+        with open('historic_aqi.txt', 'w') as outfile:
+            outfile.write("Location not found.")
 
 else:
-    # Write an an error message to the request file if the request was not in the database
+    # Write an an error message to the request file if the request was not a city
     with open('historic_aqi.txt', 'w') as outfile:
-        outfile.write("Location not found.")
-
+        outfile.write("Entry not recognized. Please check for typos.")
 outfile.close()
