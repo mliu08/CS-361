@@ -13,7 +13,7 @@
 library(shiny)
 library(shiny.router)
 library(ggplot2)
-library(plotly)
+#library(plotly)
 library(reticulate)
 library(Rcpp)
 subprocess <- reticulate::import("subprocess")
@@ -43,8 +43,8 @@ new_search_page <- div(
         
         fluidRow(
             # zip submission form
-            column(width = 5, textInput("zip", "Or, enter your own city / 5-digit zip code:")), 
-            column(7, style = "margin-top:30px;", 
+            column(width = 7, textInput("zip", "Or, enter your own city / 5-digit zip code:")), 
+            column(5, style = "margin-top:30px;", 
                    actionButton("new_search", label = "Submit", icon = NULL, width = NULL))
         )
     )
@@ -105,7 +105,10 @@ dash_page <- div(
         
         # Display plot
         mainPanel(
-            plotOutput("aqPlot")
+            plotOutput("aqPlot"),
+            br(),
+            br(),
+            textOutput("avg_desc")
         )
     )
 )
@@ -132,11 +135,11 @@ server <- function(input, output, session) {
     thematic::thematic_shiny()
     
     output$map_image_initial <- renderImage({
-        list(src = "stock USA map.png", contentType = 'image/png', deleteFIle=FALSE)
+        list(src = "stock USA map stars.png", contentType = 'image/png', deleteFIle=FALSE)
     })
     
     output$map_image_new <- renderImage({
-        list(src = "stock USA map.png", contentType = 'image/png',  deleteFIle=FALSE)
+        list(src = "stock USA map stars.png", contentType = 'image/png',  deleteFIle=FALSE)
     })
     
     #
@@ -206,6 +209,19 @@ server <- function(input, output, session) {
                     #TODO: add dynamic legend & title
                     
                 }, res = 96)
+                
+                ##
+                ## microservice - Display the text equivalent for a given AQI - notionally converted from PM2.5 in this case
+                ## using revised breakpoints here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/
+                ##
+                
+                pm25_avg <- mean(df$City1, na.rm = TRUE)
+                
+                write(pm25_avg, "pm25_avg.txt")
+                subprocess$run('py .\\Weather_goodinel_mod.py')
+                avg_desc <- readLines("response.txt")
+                
+                output$avg_desc <- renderText(paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc))
                 
                 # go to the trend page
                 change_page("trends")
