@@ -13,7 +13,7 @@
 library(shiny)
 library(shiny.router)
 library(ggplot2)
-#library(plotly)
+library(leaflet)
 library(reticulate)
 library(Rcpp)
 subprocess <- reticulate::import("subprocess")
@@ -21,52 +21,42 @@ subprocess <- reticulate::import("subprocess")
 
 # Initial page - starts a new search
 new_search_page <- div(
-    
     headerPanel("Choose a city from the map below"),
-    
     mainPanel(
-        
         # instruction text
         h5("Choose a pre-selected city from the map, or enter the name or ZIP 
-           code of a city of your choice to see air quality trends from that 
+           code of a US city of your choice to see air quality trends from that 
            area."),
-        p("TIP: not every city has data available", 
-          style ="font-size:10pt;"),
+        p("TIP: not every city has data available", style ="font-size:10pt;"),
         
         br(),
         
         # map with pre-selected cities to choose from
-        imageOutput("map_image_initial"),
-        
+        leafletOutput('usa_map'),
+
         br(),
         br(),
-        
         fluidRow(
             # zip submission form
             column(width = 7, textInput("zip", "Or, enter your own city / 5-digit zip code:")), 
             column(5, style = "margin-top:30px;", 
-                   actionButton("new_search", label = "Submit", icon = NULL, width = NULL))
-        )
+                   actionButton("new_search", label = "Submit", icon = NULL, width = NULL))),
     )
 )
 
 # Page to add more cities to existing trend
 add_page <- div(
-    
     headerPanel("Choose another city from the map below"),
-    
     mainPanel(
-        
-        # instruction text
-        h5("Choose another pre-selected city from the map, or enter the ZIP code
-        of your choice to see air quality trends from that area."),
+        h5("Choose another pre-selected city from the map, or enter a US ZIP code 
+           to see air quality trends from that area."),
         p("TIP: Comparing more than 2 cities at once may make trends difficult
            to read.", style ="font-size:10pt;"),
         
         br(),
         
         # map with pre-selected cities to choose from
-        imageOutput("map_image_new"),
+        #leafletOutput('usa_map'),
         
         br(),
         br(),
@@ -82,7 +72,7 @@ add_page <- div(
 dash_page <- div(
     titlePanel("Trends"),
     
-    # Sidebar with a slider input for number of bins 
+    # Sidebar with a slider for chart axes
     sidebarLayout(
         sidebarPanel(
             helpText("Move sliders to change the ranges on the graph"),
@@ -134,29 +124,36 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    output$map_image_initial <- renderImage({
-        list(src = "stock USA map stars.png", contentType = 'image/png', deleteFIle=FALSE)
+    # Map for Input Pages - default locations = Seattle, LA, Chicago, Houston, Boston
+    city_names <- c("Seattle", "Los Angeles", "Chicago", "Houston", "Boston")
+    default_lat <- c(47.606209, 34.052235, 41.878113, 29.760427, 42.3601)
+    default_lon <- c(-122.332069, -118.243683, -87.629799, -95.369804, -71.0589)
+    output$usa_map <- renderLeaflet({
+        leaflet() %>% 
+            addTiles() %>%
+            setView(-94, 42, zoom = 3) %>%
+            addMarkers(lng = default_lon, 
+                       lat = default_lat,
+                       layerId = city_names) 
     })
     
-    output$map_image_new <- renderImage({
-        list(src = "stock USA map stars.png", contentType = 'image/png',  deleteFIle=FALSE)
-    })
-    
-    #
-    # --- Data pull ---
-    #
-    #   1) Write desired ZIP to 'historic_aqi.txt';
-    #   2) Run microservice 'get_historic_pm25.py';
-    #   3) Read data from 'pm25py.csv'
-    #
-    #   Source: AQICN database on dbnomics
-    #
+
     # TODO: make data pull a module
     
 #
 # --- EVENT HANDLERS ---
 #
-    # performs new search
+
+    # Write map click for a city search
+    observeEvent(input$usa_map_marker_click,{
+        writeLines(as.character(input$usa_map_marker_click$id), "historic_aqi.txt")
+        
+        # go to: do a city search
+        
+        # go to: render df
+    })
+    
+    # performs new search from text-input
     observeEvent(input$new_search,{
         # check if input blank
         if (input$zip == ""){
@@ -170,6 +167,7 @@ server <- function(input, output, session) {
         } else {
             
             # fetch data
+            # Source: AQICN database on dbnomics
             writeLines(as.character(input$zip), "historic_aqi.txt")
             subprocess$run('py .\\get_historic_pm25.py')
             
@@ -221,7 +219,8 @@ server <- function(input, output, session) {
                 subprocess$run('py .\\Weather_goodinel_mod.py')
                 avg_desc <- readLines("response.txt")
                 
-                output$avg_desc <- renderText(paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc))
+                output$avg_desc <- renderText(
+                    paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc))
                 
                 # go to the trend page
                 change_page("trends")
