@@ -13,7 +13,7 @@ import dbnomics
 from geopy import geocoders
 
 
-# Get location request from a text file. Expects a zip code.
+# Get location request from a text file. Expects a zip code or city.
 with open('historic_aqi.txt', 'r', encoding='UTF8') as infile:
     location = infile.readline()
 
@@ -28,12 +28,12 @@ if search is not None:
     city = city_county.split(",")[0].lower()      
 
     # validate city against the 57 in the database
-    db_cities = []
+    db_cities = []                                                  # TODO: sometimes geocode returns neighborhood first, remove
     with open('cities.txt', 'r', encoding='UTF8') as infile:
         db_cities = infile.read().splitlines()
 
     if city.capitalize() in db_cities:
-        fetch_code = 'AQICN/AQI/US.' + city + '.pm25.median'
+        fetch_code = 'AQICN/AQI/US.' + city + '.pm25.median'        # TODO: deal with multi word cities - need underscore
 
         # Acquire data and remove unnecessary columns
         df = dbnomics.fetch_series(fetch_code)
