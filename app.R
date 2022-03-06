@@ -36,16 +36,22 @@ new_search_page <- div(
 
         br(),
         br(),
+        
+        # zip submission form
         fluidRow(
-            # zip submission form
-            column(width = 7, textInput("zip", "Or, enter your own city / 5-digit zip code:")), 
+            column(width = 7, 
+                   textInput("zip", 
+                             "Or, enter your own city / 5-digit zip code:")),   # TODO: make submit button stick relative to input box on page resize
             column(5, style = "margin-top:30px;", 
-                   actionButton("new_search", label = "Submit", icon = NULL, width = NULL))),
+                   actionButton("new_search", 
+                                label = "Submit",
+                                icon = NULL, 
+                                width = NULL)))
     )
 )
 
 # Page to add more cities to existing trend
-add_page <- div(
+add_page <- div(                                                                # TODO: merge with initial search page? use reactive expressions / conditionalPanel()
     headerPanel("Choose another city from the map below"),
     mainPanel(
         h5("Choose another pre-selected city from the map, or enter a US ZIP code 
@@ -56,15 +62,15 @@ add_page <- div(
         br(),
         
         # map with pre-selected cities to choose from
-        #leafletOutput('usa_map'),
+        #leafletOutput('usa_map'),  
         
-        br(),
-        br(),
+        br(),                                                                   # TODO: trying to re-render the same map causes issues. 
+        br(),                                                                   # TODO: also grey out city if already chosen?
         
         # zip submission form
         textInput("add_zip", "Or, enter a 5-digit zip code:"), 
         actionButton("added_city", label = "Submit", icon = NULL, width = NULL),
-        actionButton("trend", label = "Go Back", icon = NULL, width = NULL)
+        actionButton("back_to_trend", label = "Go Back", icon = NULL, width = NULL)
     )
 )
 
@@ -78,7 +84,7 @@ dash_page <- div(
             helpText("Move sliders to change the ranges on the graph"),
             br(),
             
-            #TODO: update range based on limits in data file unless doing a standard pull
+                                                                                # TODO: update range based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
                         min = as.Date("2018-12-31"),
                         max = as.Date("2022-01-01"),
@@ -103,15 +109,106 @@ dash_page <- div(
     )
 )
 
-# Router
+#
+# --- ROUTER -------------------------------------------------------------------
+#
 router <- make_router(
     route("/", new_search_page),
     route("trends", dash_page),
     route("add-city", add_page)
 )
 
+#
+# --- SERVER MODULES -----------------------------------------------------------
+#
 
-# UI
+# Validate user text input
+dataValidateServer <- function(id, user_text, df){
+    moduleServer(id, function(input, output, session){
+        # Check if input box left blank                                                             
+        if (user_text == "") {                                                  # TODO: currently continues to data pull even if input box left blank
+            showModal(
+                modalDialog(title = "Error",
+                            "Please enter a zip code or city name, or choose a city from the map.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else if (ncol(df) == 4) {
+            # Check if 3 cities already trended
+            showModal(
+                modalDialog(title = "Error",
+                            "Only 3 cities can be trended at one time.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else {
+            return(TRUE)
+        }
+        return(FALSE)
+    })
+}
+
+# Perform search for air quality data
+# Source: AQICN database on dbnomics
+dataSearchServer <- function(id, given_location){
+    moduleServer(id, function(input, output, session){
+        
+        # Request data
+        writeLines(as.character(given_location), "historic_aqi.txt")
+        subprocess$run('py .\\get_historic_pm25.py')
+        
+        # Check if the request was successful
+        confirm_request <- readLines("historic_aqi.txt")
+        if (confirm_request == "Location not found."){
+            showModal(
+                modalDialog(title = "Sorry!",
+                            "No data found for that location. Please try another.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else if (confirm_request == "Entry not recognized. Please check for typos."){
+            showModal(
+                modalDialog(title = "Sorry!",
+                            "Entry not recognized. Please check for typos.",
+                            footer = tagList(
+                                modalButton("Ok."))
+                )
+            )
+        } else {
+            # Load data from file into data frame
+            df <- read.csv("pm25py.csv")
+            df <- df[2:3]
+            colnames(df) <- c('Date', as.character(confirm_request))  
+            df$Date <- as.Date(df$Date)
+            return(df)
+        }
+    })
+}
+
+# Render the given data frame
+plotServer <- function(id, df, map_aes, x_slide, y_slide){                       # TODO: add dynamic legend & title
+    moduleServer(id, function(input, output, session){
+        return(renderPlot({
+            
+            ggplot(df, map_aes) + 
+                geom_line() +
+                labs(x = "Date", y = "PM2.5", title = "Air quality trend for City 1") +
+                scale_x_date(date_labels = "%b-%Y") +
+                xlim(x_slide) +
+                ylim(y_slide)                                                   # TODO: gives error. "discrete value supplied to continuous scale"
+            
+        }, res = 96)) 
+    })
+}
+
+                                                                                # TODO: implement microservice module
+
+#
+# --- UI -----------------------------------------------------------------------
+#
 ui <- fluidPage(
     theme = bslib::bs_theme(bootswatch = "yeti"),
     title = "Historical Air Quality Trends",
@@ -119,12 +216,14 @@ ui <- fluidPage(
     router$ui
 )
 
-# Server
+#
+# --- SERVER -------------------------------------------------------------------
+#
 server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
-    # Map for Input Pages - default locations = Seattle, LA, Chicago, Houston, Boston
+    # Interactive map for input pages with markers for default locations
     city_names <- c("Seattle", "Los Angeles", "Chicago", "Houston", "Boston")
     default_lat <- c(47.606209, 34.052235, 41.878113, 29.760427, 42.3601)
     default_lon <- c(-122.332069, -118.243683, -87.629799, -95.369804, -71.0589)
@@ -137,207 +236,119 @@ server <- function(input, output, session) {
                        layerId = city_names) 
     })
     
-
-    # TODO: make data pull a module
-    
 #
-# --- EVENT HANDLERS ---
+# --- EVENT HANDLERS ------------------------------
 #
-
     # Write map click for a city search
     observeEvent(input$usa_map_marker_click,{
-        writeLines(as.character(input$usa_map_marker_click$id), "historic_aqi.txt")
+        df <- dataSearchServer("usa_map_marker_click$id", input$usa_map_marker_click$id)
+        output$aqPlot <- plotServer("usa_map_marker_click$id", 
+                                    df, aes(Date, names(df[2])), 
+                                    input$time_slide, 
+                                    input$aq_slide)
+        # microservice module
         
-        # go to: do a city search
-        
-        # go to: render df
+        change_page("trends")
     })
     
-    # performs new search from text-input
+    # performs new search from text input
     observeEvent(input$new_search,{
-        # check if input blank
-        if (input$zip == ""){
-            showModal(
-                modalDialog(title = "Error",
-                            "Please enter a zip code or city name, or choose a city from the map.",
-                            footer = tagList(
-                                modalButton("Ok."))
-                )
+        df <- data.frame()
+        if (dataValidateServer("new_search", input$zip, df) == TRUE){
+            df <- dataSearchServer("new_search", input$zip)
+            output$aqPlot <- plotServer("new_search", df, 
+                                        aes(Date, names(df[2])), 
+                                        input$time_slide, 
+                                        input$aq_slide)
+            
+            ##
+            ## microservice - Display the text equivalent for a given AQI - converted from PM2.5 
+            ## using revised breakpoints here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/
+            ##
+            
+            pm25_avg <- mean(df$City1, na.rm = TRUE)
+            
+            write(pm25_avg, "pm25_avg.txt")
+            subprocess$run('py .\\Weather_goodinel_mod.py')
+            avg_desc <- readLines("response.txt")
+            
+            output$avg_desc <- renderText(
+                paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc)
             )
-        } else {
             
-            # fetch data
-            # Source: AQICN database on dbnomics
-            writeLines(as.character(input$zip), "historic_aqi.txt")
-            subprocess$run('py .\\get_historic_pm25.py')
-            
-            # Check if the request was successful
-            confirm_request <- readLines("historic_aqi.txt")
-            if (confirm_request == "Location not found."){
-                showModal(
-                    modalDialog(title = "Sorry!",
-                                "No data found for that location. Please try another.",
-                                footer = tagList(
-                                    modalButton("Ok."))
-                    )
-                )
-            } else if (confirm_request == "Entry not recognized. Please check for typos."){
-                showModal(
-                    modalDialog(title = "Sorry!",
-                                "Entry not recognized. Please check for typos.",
-                                footer = tagList(
-                                    modalButton("Ok."))
-                    )
-                )
-            } else {
-                df_raw <- read.csv("pm25py.csv")
-                df <- df_raw[2:3]
-                colnames(df) <- c('Date', 'City1')  # as.character(confirm_request)
-                df$Date <- as.Date(df$Date)
-                output$aqPlot <- renderPlot({
-                    
-                    # render the plot with the data frame
-                    ggplot(df, aes(Date, City1)) + 
-                        geom_line() +
-                        labs(x = "Date", y = "PM2.5", title = "Air quality trend for City 1") +
-                        scale_x_date(date_labels = "%b-%Y") +
-                        xlim(input$time_slide) +
-                        ylim(input$aq_slide)
-                    
-                    #TODO: add dynamic legend & title
-                    
-                }, res = 96)
-                
-                ##
-                ## microservice - Display the text equivalent for a given AQI - notionally converted from PM2.5 in this case
-                ## using revised breakpoints here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/
-                ##
-                
-                pm25_avg <- mean(df$City1, na.rm = TRUE)
-                
-                write(pm25_avg, "pm25_avg.txt")
-                subprocess$run('py .\\Weather_goodinel_mod.py')
-                avg_desc <- readLines("response.txt")
-                
-                output$avg_desc <- renderText(
-                    paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc))
-                
-                # go to the trend page
-                change_page("trends")
-                
-            }
+            change_page("trends")
         }
     })
     
     # updates df with newly-requested city
-    observeEvent(input$added_city,{
-        
-        if (input$add_zip == "") {
-            # check if input blank
-            showModal(
-                modalDialog(title = "Error",
-                            "Please enter a zip code or city name, or choose a city from the map.",
-                            footer = tagList(
-                                modalButton("Ok."))
-                )
-            )
-        } else if (ncol(df) == 4) {
-            # check if 3 cities already trended
-            showModal(
-                modalDialog(title = "Error",
-                            "Only 3 cities can be trended at one time.",
-                            footer = tagList(
-                                modalButton("Ok."))
-                )
-            )
-        } else {
-            # fetch data
-            writeLines(as.character(input$add_zip), "historic_aqi.txt")
-            subprocess$run('py .\\get_historic_pm25.py')
+    observeEvent(input$added_city,{ 
+        df <- data.frame()
+        if (dataValidateServer("added_city", input$add_zip, df)){
+            df <- cbind(df, dataSearchServer("added_city", input$add_zip)[2])
+            output$aqPlot <- plotServer("new_search", df, 
+                                        aes(Date, names(df[2])), 
+                                        input$time_slide, 
+                                        input$aq_slide)
             
-            # Check if the request was successful
-            confirm_request <- readLines("historic_aqi.txt")
-            if (confirm_request == "Location not found."){
-                showModal(
-                    modalDialog(title = "Sorry!",
-                                "No data found for that location. Please try another.",
-                                footer = tagList(
-                                    modalButton("Ok."))
-                    )
-                )
-            } else if (confirm_request == "Entry not recognized. Please check for typos."){
-                showModal(
-                    modalDialog(title = "Sorry!",
-                                "Entry not recognized. Please check for typos.",
-                                footer = tagList(
-                                    modalButton("Ok."))
-                    )
-                )
-            } else{
-                df_add <- read.csv("pm25py.csv")
+                                                                                # TODO: make group a parameter of plotServer? look up melt function
+            # Render the plot for 2 cities
+            if (ncol(df) == 2){
+                colnames(df_add) <- c('Index', 'Date', 'City 2')
+                df <- cbind(df, df_add[3])
                 
-                # Render the plot for 2 cities
-                if (ncol(df) == 2){
-                    colnames(df_add) <- c('Index', 'Date', 'City 2')
-                    df <- cbind(df, df_add[3])
+                # reshape dataframe to be able to plot two columns
+                df_2 <- data.frame(x = df$Date,
+                                   y = c(df$City1, df$City2),
+                                   group = c(rep("City1", nrow(df)),
+                                             rep("City2", nrow(df))))
+                
+                head(df_2)
+                
+                output$aqPlot <- renderPlot({
+                    # render the plot with the data frame
+                    ggplot(df_2, aes(x, y, col = group, color=variable)) + 
+                        geom_line() +
+                        labs(x = "Date", y = "PM2.5", 
+                             title = "Air quality trend for - Chosen Cities") +
+                        scale_x_date(date_labels = "%b-%Y") +
+                        xlim(input$time_slide) +
+                        ylim(input$aq_slide)
                     
-                    # reshape dataframe to be able to plot two columns
-                    df_2 <- data.frame(x = df$Date,
-                                       y = c(df$City1, df$City2),
-                                       group = c(rep("City1", nrow(df)),
-                                                 rep("City2", nrow(df))))
                     
-                    head(df_2)
-                    
-                    
-                    output$aqPlot <- renderPlot({
-                        # render the plot with the data frame
-                        ggplot(df_2, aes(x, y, col = group, color=variable)) + 
-                            geom_line() +
-                            labs(x = "Date", y = "PM2.5", 
-                                 title = "Air quality trend for - Chosen Cities") +
-                            scale_x_date(date_labels = "%b-%Y") +
-                            xlim(input$time_slide) +
-                            ylim(input$aq_slide)
-                        
-                        
-                    }, res = 96)
+                }, res = 96)
 
                     
-                } else {
-                 # Render the plot for 3 cities  
-                    colnames(df_add) <- c('Index', 'Date', 'City 3')
-                    df <- cbind(df, df_add[3])
-                    
-                    # reshape dataframe to be able to plot two columns
-                    df_3 <- data.frame(x = df$Date,
-                                       y = c(df$City1, df$City2, df$City3),
-                                       group = c(rep("City1", nrow(df)),
-                                                 rep("City2", nrow(df)),
-                                                 rep("City3", nrow(df))))
-                    head(df_3)
-                    
-                    output$aqPlot <- renderPlot({
-                        # render the plot with the data frame
-                        ggplot(df_3, aes(x, y, col = group, color=variable)) + 
-                            geom_line() +
-                            labs(x = "Date", y = "PM2.5", 
-                                 title = "Air quality trend for - Chosen Cities") +
-                            scale_x_date(date_labels = "%b-%Y") +
-                            xlim(input$time_slide) +
-                            ylim(input$aq_slide)
-                        
-                        
-                    }, res = 96)
-                }
+            } else {
+             # Render the plot for 3 cities  
+                colnames(df_add) <- c('Index', 'Date', 'City 3')
+                df <- cbind(df, df_add[3])
                 
-                # go to the trend page
-                change_page("trends")
+                # reshape dataframe to be able to plot two columns
+                df_3 <- data.frame(x = df$Date,
+                                   y = c(df$City1, df$City2, df$City3),
+                                   group = c(rep("City1", nrow(df)),
+                                             rep("City2", nrow(df)),
+                                             rep("City3", nrow(df))))
+                head(df_3)
+                
+                output$aqPlot <- renderPlot({
+                    # render the plot with the data frame
+                    ggplot(df_3, aes(x, y, col = group, color=variable)) + 
+                        geom_line() +
+                        labs(x = "Date", y = "PM2.5", 
+                             title = "Air quality trend for - Chosen Cities") +
+                        scale_x_date(date_labels = "%b-%Y") +
+                        xlim(input$time_slide) +
+                        ylim(input$aq_slide)
+                    
+                    
+                }, res = 96)
             }
+            change_page("trends")
         }
     })
     
-    # goes back to starting screen.
+    # Start over: clears existing data
     observeEvent(input$start_over,{
         showModal(
             modalDialog(title = "Caution",
@@ -347,30 +358,24 @@ server <- function(input, output, session) {
                 actionButton("confirm_new", "Confirm new search")) 
             )
         )
+        
+        observeEvent(input$confirm_new,{
+            updateTextInput(session, "zip", value = "")
+            change_page("/")
+                                                                                # TODO: update slider min/max here
+            removeModal()
+        })
     })
     
-    # goes to the new search screen
-    observeEvent(input$confirm_new,{
-        change_page("/")
-        # TODO: update slider min/max here
-        removeModal()
-    })
-    
-    # goes to the add-a-city screen
+    # Go to the add-a-city screen
     observeEvent(input$add_city,{
         change_page("add-city")
     })
     
-    # goes to the trend screen
-    observeEvent(input$trend,{
+    # Return to trend screen from add-a-city screen
+    observeEvent(input$back_to_trend,{
         change_page("trends")
     })
-    
-    # TODO: do any aggregation to make it more readable? 
-#
-# --- Generate Plot ---
-#
-    
 }
 
 shinyApp(ui = ui, server = server)
