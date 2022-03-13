@@ -7,7 +7,7 @@
 # Version: 1.2.0
 # Description: A web app that allows a user to choose a city, and then takes 
 #               air quality data for that city and displays a historical
-#               trend. Users can add multiple cities to the same trend.
+#               trend. Users can add up to 3 cities to the same trend.
 #              
 
 library(shiny)
@@ -19,9 +19,9 @@ library(Rcpp)
 subprocess <- reticulate::import("subprocess")
 
 
-# Initial page - starts a new search
+# Initial page - starts a new search                                            
 new_search_page <- div(
-    headerPanel("Choose a city from the map below"),
+    headerPanel("Choose a city from the map below"),                            # TODO: camelCase everything :(
     mainPanel(
         # instruction text
         h5("Choose a pre-selected city from the map, or enter the name or ZIP 
@@ -36,7 +36,7 @@ new_search_page <- div(
 
         br(),
         br(),
-        
+                                                                                # TODO: hover text / collapse definitions on pages. links to more info?
         # zip submission form
         fluidRow(
             column(width = 7, 
@@ -65,7 +65,7 @@ add_page <- div(                                                                
         #leafletOutput('usa_map'),  
         
         br(),                                                                   # TODO: trying to re-render the same map causes issues. 
-        br(),                                                                   # TODO: also grey out city if already chosen?
+        br(),                                                                   # TODO: also grey out city if already chosen? - conditional leaflet marker?
         
         # zip submission form
         textInput("add_zip", "Or, enter a 5-digit zip code:"), 
@@ -90,6 +90,7 @@ dash_page <- div(
                         max = as.Date("2022-01-01"),
                         value = c(as.Date("2018-12-31"), as.Date("2022-01-01")), 
                         timeFormat = "%F", dragRange = TRUE),
+            
             sliderInput("aq_slide", "PM2.5",
                         min = 0,
                         max = 300,
@@ -122,30 +123,40 @@ router <- make_router(
 # --- SERVER MODULES -----------------------------------------------------------
 #
 
-# Validate user text input
-dataValidateServer <- function(id, user_text, df){
+# Check whether to make a request from the user input; if not, notify user
+dataValidateServer <- function(id, user_text, city_list){
     moduleServer(id, function(input, output, session){
+        
         # Check if input box left blank                                                             
-        if (user_text == "") {                                                  # TODO: currently continues to data pull even if input box left blank
+        if (user_text == "") {                                                  
             showModal(
                 modalDialog(title = "Error",
                             "Please enter a zip code or city name, or choose a city from the map.",
-                            footer = tagList(
-                                modalButton("Ok."))
+                            footer = tagList(modalButton("Ok."))
                 )
-            )
-        } else if (ncol(df) == 4) {
+            )                                                                    
+        } else if (city_list$city_3 != "") {
+            
             # Check if 3 cities already trended
             showModal(
                 modalDialog(title = "Error",
                             "Only 3 cities can be trended at one time.",
-                            footer = tagList(
-                                modalButton("Ok."))
+                            footer = tagList(modalButton("Ok."))
+                )
+            )
+        } else if (city_list$city_1 == user_text || city_list$city_2 == user_text){
+            
+            # Check if same city already requested
+            showModal(
+                modalDialog(title = "Error",
+                            "That city is already on the trend. Please choose another.",
+                            footer = tagList(modalButton("Ok."))
                 )
             )
         } else {
             return(TRUE)
         }
+        
         return(FALSE)
     })
 }
@@ -165,16 +176,14 @@ dataSearchServer <- function(id, given_location){
             showModal(
                 modalDialog(title = "Sorry!",
                             "No data found for that location. Please try another.",
-                            footer = tagList(
-                                modalButton("Ok."))
+                            footer = tagList(modalButton("Ok."))
                 )
             )
         } else if (confirm_request == "Entry not recognized. Please check for typos."){
             showModal(
                 modalDialog(title = "Sorry!",
                             "Entry not recognized. Please check for typos.",
-                            footer = tagList(
-                                modalButton("Ok."))
+                            footer = tagList(modalButton("Ok."))
                 )
             )
         } else {
@@ -183,7 +192,11 @@ dataSearchServer <- function(id, given_location){
             df <- df[2:3]
             colnames(df) <- c('Date', as.character(confirm_request))  
             df$Date <- as.Date(df$Date)
-            return(df)
+            df <- na.omit(df)
+            
+            
+            
+            return(df)                                                          # TODO: df probably needs to be reactive to persist across queries
         }
     })
 }
@@ -198,14 +211,31 @@ plotServer <- function(id, df, map_aes, x_slide, y_slide){                      
                 labs(x = "Date", y = "PM2.5", title = "Air quality trend for City 1") +
                 scale_x_date(date_labels = "%b-%Y") +
                 xlim(x_slide) +
-                ylim(y_slide)                                                   # TODO: gives error. "discrete value supplied to continuous scale"
+                ylim(y_slide)                                                   # TODO: doesn't change axes when in the module vs in the server directly
             
         }, res = 96)) 
     })
 }
 
-                                                                                # TODO: implement microservice module
+# Implements teammate's microservice - takes PM2.5 value and returns text designation
+# using revised breakpoints from here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/ 
+descriptionServer <- function(id, df){
+    moduleServer(id, function(input, output, session){
 
+        pm25_avg <- round(mean(df$Boston, na.rm = TRUE), digits = 0)
+        
+        write(pm25_avg, "pm25_avg.txt")
+        subprocess$run('py .\\Weather_goodinel_mod.py')
+        avg_desc <- readLines("response.txt")
+        
+        return( renderText(
+            paste("The average air quality for the full data set was:",         # TODO: format this better
+                  pm25_avg,", which is", avg_desc,".")
+            )
+        )
+    })
+}
+                                                                                # TODO: fix City1/2/3. or have a reactive vector with city names and only display those
 #
 # --- UI -----------------------------------------------------------------------
 #
@@ -223,6 +253,8 @@ server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
     
+    chosen_cities <- reactiveValues(city_1 = "", city_2 = "", city_3 = "", count = 0)
+    
     # Interactive map for input pages with markers for default locations
     city_names <- c("Seattle", "Los Angeles", "Chicago", "Houston", "Boston")
     default_lat <- c(47.606209, 34.052235, 41.878113, 29.760427, 42.3601)
@@ -239,51 +271,38 @@ server <- function(input, output, session) {
 #
 # --- EVENT HANDLERS ------------------------------
 #
-    # Write map click for a city search
+    # Gather and render data from map click
     observeEvent(input$usa_map_marker_click,{
-        df <- dataSearchServer("usa_map_marker_click$id", input$usa_map_marker_click$id)
-        output$aqPlot <- plotServer("usa_map_marker_click$id", 
-                                    df, aes(Date, names(df[2])), 
-                                    input$time_slide, 
-                                    input$aq_slide)
-        # microservice module
-        
-        change_page("trends")
+        if (dataValidateServer("usa_map_marker_click", input$usa_map_marker_click$id, chosen_cities) == TRUE){
+            df <- dataSearchServer("usa_map_marker_click$id", 
+                                 input$usa_map_marker_click$id)
+            
+            output$aqPlot <- plotServer("usa_map_marker_click$id", 
+                                        df, aes(x = Date, y = Boston), 
+                                        input$time_slide, 
+                                        input$aq_slide)
+            
+            output$avg_desc <- descriptionServer("usa_map_marker_click$id", df)
+            change_page("trends")
+        }
     })
     
-    # performs new search from text input
+    # Gather and render data from user text input
     observeEvent(input$new_search,{
-        df <- data.frame()
-        if (dataValidateServer("new_search", input$zip, df) == TRUE){
+        if (dataValidateServer("new_search", input$zip, chosen_cities) == TRUE){
             df <- dataSearchServer("new_search", input$zip)
             output$aqPlot <- plotServer("new_search", df, 
                                         aes(Date, names(df[2])), 
                                         input$time_slide, 
                                         input$aq_slide)
-            
-            ##
-            ## microservice - Display the text equivalent for a given AQI - converted from PM2.5 
-            ## using revised breakpoints here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/
-            ##
-            
-            pm25_avg <- mean(df$City1, na.rm = TRUE)
-            
-            write(pm25_avg, "pm25_avg.txt")
-            subprocess$run('py .\\Weather_goodinel_mod.py')
-            avg_desc <- readLines("response.txt")
-            
-            output$avg_desc <- renderText(
-                paste("The average air quality for the full data set was:",pm25_avg, ", which is", avg_desc)
-            )
-            
-            change_page("trends")
+            output$avg_desc <- descriptionServer("new_search", df)
+            change_page("trends")   
         }
     })
     
     # updates df with newly-requested city
     observeEvent(input$added_city,{ 
-        df <- data.frame()
-        if (dataValidateServer("added_city", input$add_zip, df)){
+        if (dataValidateServer("added_city", input$add_zip, 2)){
             df <- cbind(df, dataSearchServer("added_city", input$add_zip)[2])
             output$aqPlot <- plotServer("new_search", df, 
                                         aes(Date, names(df[2])), 
@@ -314,7 +333,6 @@ server <- function(input, output, session) {
                         xlim(input$time_slide) +
                         ylim(input$aq_slide)
                     
-                    
                 }, res = 96)
 
                     
@@ -344,11 +362,12 @@ server <- function(input, output, session) {
                     
                 }, res = 96)
             }
-            change_page("trends")
+            output$avg_desc <- descriptionServer("added_city", df)
+            change_page("trends") 
         }
     })
     
-    # Start over: clears existing data
+    # Start over but confirm choice first 
     observeEvent(input$start_over,{
         showModal(
             modalDialog(title = "Caution",
@@ -359,10 +378,14 @@ server <- function(input, output, session) {
             )
         )
         
+        # Clear values and change page if new search confirmed
         observeEvent(input$confirm_new,{
             updateTextInput(session, "zip", value = "")
             change_page("/")
-                                                                                # TODO: update slider min/max here
+            updateSliderInput(session, "time_slide", 
+                              value = c(as.Date("2018-12-31"), 
+                                        as.Date("2022-01-01")))
+            updateSliderInput(session, "aq_slide", value = c(0, 300))
             removeModal()
         })
     })
