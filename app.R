@@ -295,7 +295,7 @@ server <- function(input, output, session) {
         leaflet() %>% 
             addTiles() %>%
             setView(-94, 42, zoom = 3) %>%
-            addMarkers(lng = default_lon, 
+            addCircleMarkers(lng = default_lon, 
                        lat = default_lat,
                        layerId = city_names) 
     })
