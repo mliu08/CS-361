@@ -19,58 +19,58 @@ library(Rcpp)
 subprocess <- reticulate::import("subprocess")
 
 
-# Initial page - starts a new search                                            
-new_search_page <- div(
-    headerPanel("Choose a city from the map below"),                            # TODO: camelCase everything :(
+#
+# --- UI PAGES -----------------------------------------------------------------
+#
+
+# Search page 
+search_page <- div(
+    headerPanel("Choose a city from the map below"),                            # TODO: camelCase everything?? :(
     mainPanel(
-        # instruction text
+        # Instruction text
         h5("Choose a pre-selected city from the map, or enter the name or ZIP 
            code of a US city of your choice to see air quality trends from that 
            area."),
-        p("TIP: not every city has data available", style ="font-size:10pt;"),
         
         br(),
         
-        # map with pre-selected cities to choose from
-        leafletOutput('usa_map'),
-
+        # Help tips depend on whether this is a new search or a city addition
+        div(style ="font-size:10pt;",
+          "TIP: Not every city has data available", 
+          conditionalPanel(
+              condition = "input.add_city != 0",
+              style ="font-size:10pt;",
+              "TIP: Comparing more than 2 cities at once may make trends 
+              difficult to read.")
+          ),
+        
+        br(),
+        
+        # Map with pre-selected cities to choose from
+        leafletOutput('usa_map', width = "100%"),                               # TODO: markers don't render at all in the app, show as broken images in browser now?
+        
         br(),
         br(),
                                                                                 # TODO: hover text / collapse definitions on pages. links to more info?
-        # zip submission form
+        # Submission form for text entry
         fluidRow(
-            column(width = 7, 
-                   textInput("zip", 
-                             "Or, enter your own city / 5-digit zip code:")),   # TODO: make submit button stick relative to input box on page resize
-            column(5, style = "margin-top:30px;", 
-                   actionButton("new_search", 
+            column(width = 6, 
+                   textInput("text_location", 
+                             "Or, enter your own city / 5-digit zip code:")),   # TODO: make submit button stick relative to input box on page resize?
+            
+            column(2, style = "margin-top:30px;", 
+                   actionButton("search", 
                                 label = "Submit",
                                 icon = NULL, 
-                                width = NULL)))
-    )
-)
-
-# Page to add more cities to existing trend
-add_page <- div(                                                                # TODO: merge with initial search page? use reactive expressions / conditionalPanel()
-    headerPanel("Choose another city from the map below"),
-    mainPanel(
-        h5("Choose another pre-selected city from the map, or enter a US ZIP code 
-           to see air quality trends from that area."),
-        p("TIP: Comparing more than 2 cities at once may make trends difficult
-           to read.", style ="font-size:10pt;"),
-        
-        br(),
-        
-        # map with pre-selected cities to choose from
-        #leafletOutput('usa_map'),  
-        
-        br(),                                                                   # TODO: trying to re-render the same map causes issues. 
-        br(),                                                                   # TODO: also grey out city if already chosen? - conditional leaflet marker?
-        
-        # zip submission form
-        textInput("add_zip", "Or, enter a 5-digit zip code:"), 
-        actionButton("added_city", label = "Submit", icon = NULL, width = NULL),
-        actionButton("back_to_trend", label = "Go Back", icon = NULL, width = NULL)
+                                width = NULL)),
+            
+            column(2, style = "margin-top:30px;",
+                   conditionalPanel(condition = "input.add_city != 0",
+                                       actionButton("back_to_trend", 
+                                                    label = "Go Back", 
+                                                    icon = NULL, 
+                                                    width = NULL)))
+        )
     )
 )
 
@@ -114,17 +114,45 @@ dash_page <- div(
 # --- ROUTER -------------------------------------------------------------------
 #
 router <- make_router(
-    route("/", new_search_page),
-    route("trends", dash_page),
-    route("add-city", add_page)
+    route("/", search_page),
+    route("trends", dash_page)
+)
+
+#
+# --- UI -----------------------------------------------------------------------
+#
+ui <- fluidPage(
+    theme = bslib::bs_theme(bootswatch = "yeti"),
+    title = "Historical Air Quality Trends",
+    fluid = TRUE,
+    router$ui
 )
 
 #
 # --- SERVER MODULES -----------------------------------------------------------
 #
 
+inputServer <- function(id, city, chosen_cities){
+    moduleServer(id, function(input, output, session){
+        if (dataValidateServer(id, city, chosen_cities) == TRUE){
+            df <- dataSearchServer(id, city)
+
+            if (!is.null(dim(df))){
+                updateCitiesServer(id, chosen_cities, city)
+                output$aqPlot <- plotServer(id,
+                                            df, chosen_cities,
+                                            input$time_slide,
+                                            input$aq_slide)
+
+                output$avg_desc <- descriptionServer(id, df)
+                change_page("trends")
+            }
+        }
+    })
+}
+
 # Check whether to make a request from the user input; if not, notify user
-dataValidateServer <- function(id, user_text, city_list){
+dataValidateServer <- function(id, user_text, chosen_cities){
     moduleServer(id, function(input, output, session){
         
         # Check if input box left blank                                                             
@@ -135,16 +163,16 @@ dataValidateServer <- function(id, user_text, city_list){
                             footer = tagList(modalButton("Ok."))
                 )
             )                                                                    
-        } else if (city_list$city_3 != "") {
+        } else if (chosen_cities$city_3 != "") {
             
-            # Check if 3 cities already trended
+            # Limit trend to 3 cities at once
             showModal(
                 modalDialog(title = "Error",
                             "Only 3 cities can be trended at one time.",
                             footer = tagList(modalButton("Ok."))
                 )
             )
-        } else if (city_list$city_1 == user_text || city_list$city_2 == user_text){
+        } else if (chosen_cities$city_1 == user_text || chosen_cities$city_2 == user_text){
             
             # Check if same city already requested
             showModal(
@@ -167,8 +195,8 @@ dataSearchServer <- function(id, given_location){
     moduleServer(id, function(input, output, session){
         
         # Request data
-        writeLines(as.character(given_location), "historic_aqi.txt")
-        subprocess$run('py .\\get_historic_pm25.py')
+ #       writeLines(as.character(given_location), "historic_aqi.txt")
+ #       subprocess$run('py .\\get_historic_pm25.py')
         
         # Check if the request was successful
         confirm_request <- readLines("historic_aqi.txt")
@@ -193,22 +221,38 @@ dataSearchServer <- function(id, given_location){
             colnames(df) <- c('Date', as.character(confirm_request))  
             df$Date <- as.Date(df$Date)
             df <- na.omit(df)
-            
-            
-            
             return(df)                                                          # TODO: df probably needs to be reactive to persist across queries
         }
+        
+        return(data.frame())
     })
 }
 
-# Render the given data frame
-plotServer <- function(id, df, map_aes, x_slide, y_slide){                       # TODO: add dynamic legend & title
+# Update the city count and names of cities chosen
+updateCitiesServer <- function(id, chosen_cities, city){
+    moduleServer(id, function(input, output, session){
+        
+        chosen_cities$count <- chosen_cities$count + 1 
+
+        if (chosen_cities$city_1 == ""){
+            chosen_cities$city_1 = city
+        } else if (chosen_cities$city_2 == ""){
+            chosen_cities$city_2 = city
+        } else {
+            chosen_cities$city_3 = city
+        }
+    
+    })
+}
+
+# Render the given data frame                                                   # TODO: make group a parameter of plotServer? look up melt function
+plotServer <- function(id, df, cities, x_slide, y_slide){                       # TODO: add dynamic legend & title
     moduleServer(id, function(input, output, session){
         return(renderPlot({
             
-            ggplot(df, map_aes) + 
-                geom_line() +
-                labs(x = "Date", y = "PM2.5", title = "Air quality trend for City 1") +
+            ggplot(df, aes(x = Date)) + 
+                geom_line(aes(y = as.character(cities$city_1))) +
+                labs(x = "Date", y = "PM2.5", title = paste("Air quality trend for", as.character(cities$city_1))) +
                 scale_x_date(date_labels = "%b-%Y") +
                 xlim(x_slide) +
                 ylim(y_slide)                                                   # TODO: doesn't change axes when in the module vs in the server directly
@@ -235,25 +279,13 @@ descriptionServer <- function(id, df){
         )
     })
 }
-                                                                                # TODO: fix City1/2/3. or have a reactive vector with city names and only display those
-#
-# --- UI -----------------------------------------------------------------------
-#
-ui <- fluidPage(
-    theme = bslib::bs_theme(bootswatch = "yeti"),
-    title = "Historical Air Quality Trends",
-    fluid = TRUE,
-    router$ui
-)
-
+                                                                                
 #
 # --- SERVER -------------------------------------------------------------------
 #
 server <- function(input, output, session) {
     router$server(input, output, session)
     thematic::thematic_shiny()
-    
-    chosen_cities <- reactiveValues(city_1 = "", city_2 = "", city_3 = "", count = 0)
     
     # Interactive map for input pages with markers for default locations
     city_names <- c("Seattle", "Los Angeles", "Chicago", "Houston", "Boston")
@@ -268,106 +300,26 @@ server <- function(input, output, session) {
                        layerId = city_names) 
     })
     
+    chosen_cities <- reactiveValues(city_1 = "", 
+                                    city_2 = "", 
+                                    city_3 = "", 
+                                    count = 0)
+    
 #
 # --- EVENT HANDLERS ------------------------------
 #
     # Gather and render data from map click
     observeEvent(input$usa_map_marker_click,{
-        if (dataValidateServer("usa_map_marker_click", input$usa_map_marker_click$id, chosen_cities) == TRUE){
-            df <- dataSearchServer("usa_map_marker_click$id", 
-                                 input$usa_map_marker_click$id)
-            
-            output$aqPlot <- plotServer("usa_map_marker_click$id", 
-                                        df, aes(x = Date, y = Boston), 
-                                        input$time_slide, 
-                                        input$aq_slide)
-            
-            output$avg_desc <- descriptionServer("usa_map_marker_click$id", df)
-            change_page("trends")
-        }
-    })
+        inputServer("usa_map_marker_click", input$usa_map_marker_click$id, chosen_cities)
+        
+    })                                                                          
     
     # Gather and render data from user text input
-    observeEvent(input$new_search,{
-        if (dataValidateServer("new_search", input$zip, chosen_cities) == TRUE){
-            df <- dataSearchServer("new_search", input$zip)
-            output$aqPlot <- plotServer("new_search", df, 
-                                        aes(Date, names(df[2])), 
-                                        input$time_slide, 
-                                        input$aq_slide)
-            output$avg_desc <- descriptionServer("new_search", df)
-            change_page("trends")   
-        }
+    observeEvent(input$search,{
+        inputServer("search", input$text_location, chosen_cities)
     })
     
-    # updates df with newly-requested city
-    observeEvent(input$added_city,{ 
-        if (dataValidateServer("added_city", input$add_zip, 2)){
-            df <- cbind(df, dataSearchServer("added_city", input$add_zip)[2])
-            output$aqPlot <- plotServer("new_search", df, 
-                                        aes(Date, names(df[2])), 
-                                        input$time_slide, 
-                                        input$aq_slide)
-            
-                                                                                # TODO: make group a parameter of plotServer? look up melt function
-            # Render the plot for 2 cities
-            if (ncol(df) == 2){
-                colnames(df_add) <- c('Index', 'Date', 'City 2')
-                df <- cbind(df, df_add[3])
-                
-                # reshape dataframe to be able to plot two columns
-                df_2 <- data.frame(x = df$Date,
-                                   y = c(df$City1, df$City2),
-                                   group = c(rep("City1", nrow(df)),
-                                             rep("City2", nrow(df))))
-                
-                head(df_2)
-                
-                output$aqPlot <- renderPlot({
-                    # render the plot with the data frame
-                    ggplot(df_2, aes(x, y, col = group, color=variable)) + 
-                        geom_line() +
-                        labs(x = "Date", y = "PM2.5", 
-                             title = "Air quality trend for - Chosen Cities") +
-                        scale_x_date(date_labels = "%b-%Y") +
-                        xlim(input$time_slide) +
-                        ylim(input$aq_slide)
-                    
-                }, res = 96)
-
-                    
-            } else {
-             # Render the plot for 3 cities  
-                colnames(df_add) <- c('Index', 'Date', 'City 3')
-                df <- cbind(df, df_add[3])
-                
-                # reshape dataframe to be able to plot two columns
-                df_3 <- data.frame(x = df$Date,
-                                   y = c(df$City1, df$City2, df$City3),
-                                   group = c(rep("City1", nrow(df)),
-                                             rep("City2", nrow(df)),
-                                             rep("City3", nrow(df))))
-                head(df_3)
-                
-                output$aqPlot <- renderPlot({
-                    # render the plot with the data frame
-                    ggplot(df_3, aes(x, y, col = group, color=variable)) + 
-                        geom_line() +
-                        labs(x = "Date", y = "PM2.5", 
-                             title = "Air quality trend for - Chosen Cities") +
-                        scale_x_date(date_labels = "%b-%Y") +
-                        xlim(input$time_slide) +
-                        ylim(input$aq_slide)
-                    
-                    
-                }, res = 96)
-            }
-            output$avg_desc <- descriptionServer("added_city", df)
-            change_page("trends") 
-        }
-    })
-    
-    # Start over but confirm choice first 
+    # Start over with new search but confirm choice first 
     observeEvent(input$start_over,{
         showModal(
             modalDialog(title = "Caution",
@@ -380,8 +332,15 @@ server <- function(input, output, session) {
         
         # Clear values and change page if new search confirmed
         observeEvent(input$confirm_new,{
-            updateTextInput(session, "zip", value = "")
+            updateTextInput(session, "text_location", value = "")
             change_page("/")
+            
+            # Clear the recorded chosen cities
+            chosen_cities$count <- 0 
+            chosen_cities$city_1 <- ""
+            chosen_cities$city_2 <- ""
+            chosen_cities$city_3 <- ""
+            
             updateSliderInput(session, "time_slide", 
                               value = c(as.Date("2018-12-31"), 
                                         as.Date("2022-01-01")))
@@ -390,12 +349,12 @@ server <- function(input, output, session) {
         })
     })
     
-    # Go to the add-a-city screen
+    # Go to the search page
     observeEvent(input$add_city,{
-        change_page("add-city")
+        change_page("/")
     })
     
-    # Return to trend screen from add-a-city screen
+    # Return to trend page 
     observeEvent(input$back_to_trend,{
         change_page("trends")
     })
