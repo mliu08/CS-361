@@ -13,6 +13,7 @@
 library(shiny)
 library(shiny.router)
 library(ggplot2)
+library(reshape2)
 library(leaflet)
 library(reticulate)
 library(Rcpp)
@@ -30,7 +31,7 @@ search_page <- div(
         # Instruction text
         h5("Choose a pre-selected city from the map, or enter the name or ZIP 
            code of a US city of your choice to see air quality trends from that 
-           area."),
+           area. You can trend up to three cities."),
         
         br(),
         
@@ -47,7 +48,7 @@ search_page <- div(
         br(),
         
         # Map with pre-selected cities to choose from
-        leafletOutput('usa_map', width = "100%"),                               # TODO: markers don't render at all in the app, show as broken images in browser now?
+        leafletOutput('usa_map', width = "100%"),                               
         
         br(),
         br(),
@@ -83,13 +84,12 @@ dash_page <- div(
         sidebarPanel(
             helpText("Move sliders to change the ranges on the graph"),
             br(),
-            
                                                                                 # TODO: update range based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
                         min = as.Date("2018-12-31"),
                         max = as.Date("2022-01-01"),
                         value = c(as.Date("2018-12-31"), as.Date("2022-01-01")), 
-                        timeFormat = "%F", dragRange = TRUE),
+                        timeFormat = "%F"),
             
             sliderInput("aq_slide", "PM2.5",
                         min = 0,
@@ -105,7 +105,9 @@ dash_page <- div(
             plotOutput("aqPlot"),
             br(),
             br(),
-            textOutput("avg_desc")
+            textOutput("avg_desc_1"),                                              # TODO: format this better
+            textOutput("avg_desc_2"),
+            textOutput("avg_desc_3")
         )
     )
 )
@@ -131,28 +133,52 @@ ui <- fluidPage(
 #
 # --- SERVER MODULES -----------------------------------------------------------
 #
-
-inputServer <- function(id, city, chosen_cities){
+inputServer <- function(id, city, chosen_cities, df){
     moduleServer(id, function(input, output, session){
-        if (dataValidateServer(id, city, chosen_cities) == TRUE){
-            df <- dataSearchServer(id, city)
-
-            if (!is.null(dim(df))){
+        if (validateInputServer(id, city, chosen_cities) == TRUE){
+            df_new <- dataSearchServer(id, city)
+            
+            if (!is.null(dim(df_new))){
+                
+                # Populate the reactive df or merge the new data with the old
+                if(is.null(dim(df$vals))){
+                    df$vals <- df_new
+                } else {
+                    df$vals <- merge(x = df$vals, y = df_new, all = TRUE)
+                }
+                
                 updateCitiesServer(id, chosen_cities, city)
-                output$aqPlot <- plotServer(id,
-                                            df, chosen_cities,
-                                            input$time_slide,
-                                            input$aq_slide)
-
-                output$avg_desc <- descriptionServer(id, df)
-                change_page("trends")
+                
+                desc_1 <- descriptionServer(id, df$vals[,chosen_cities$city_1], chosen_cities$city_1)
+                if (chosen_cities$count == 3){
+                    cities <- c(as.character(chosen_cities$city_1), 
+                                as.character(chosen_cities$city_2), 
+                                as.character(chosen_cities$city_3))
+                    
+                    desc_3 <- descriptionServer(id, df$vals[,chosen_cities$city_3], chosen_cities$city_3)
+                    desc_2 <- descriptionServer(id, df$vals[,chosen_cities$city_2], chosen_cities$city_2)
+                    
+                } else if (chosen_cities$count == 2) { 
+                    cities <- c(as.character(chosen_cities$city_1), 
+                                as.character(chosen_cities$city_2))
+                    desc_2 <- descriptionServer(id, df$vals[,chosen_cities$city_2], chosen_cities$city_2)
+                    desc_3 <- ""
+                    
+                } else {
+                    cities <- c(chosen_cities$city_1)
+                    desc_2 <- ""
+                    desc_3 <- ""
+                }
+                
+                return(list(df$vals, cities, desc_1, desc_2, desc_3))
             }
         }
+        return(NULL)
     })
 }
 
 # Check whether to make a request from the user input; if not, notify user
-dataValidateServer <- function(id, user_text, chosen_cities){
+validateInputServer <- function(id, user_text, chosen_cities){
     moduleServer(id, function(input, output, session){
         
         # Check if input box left blank                                                             
@@ -217,14 +243,14 @@ dataSearchServer <- function(id, given_location){
         } else {
             # Load data from file into data frame
             df <- read.csv("pm25py.csv")
-            df <- df[2:3]
+            df <- df[,2:3]
             colnames(df) <- c('Date', as.character(confirm_request))  
             df$Date <- as.Date(df$Date)
             df <- na.omit(df)
-            return(df)                                                          # TODO: df probably needs to be reactive to persist across queries
+            return(df)                                                          
         }
         
-        return(data.frame())
+        return(data.frame(matrix(ncol = 1, nrow = 0)))  # dummy data frame for unsuccessful request
     })
 }
 
@@ -244,38 +270,46 @@ updateCitiesServer <- function(id, chosen_cities, city){
     
     })
 }
-
-# Render the given data frame                                                   # TODO: make group a parameter of plotServer? look up melt function
-plotServer <- function(id, df, cities, x_slide, y_slide){                       # TODO: add dynamic legend & title
+                                                                                # TODO: doesn't change axes when in the module vs in the server directly
+# Render the given data frame                                                   
+plotServer <- function(id, df, city_names, count, time_slide, aq_slide){                       # TODO: add dynamic legend 
     moduleServer(id, function(input, output, session){
-        return(renderPlot({
-            
-            ggplot(df, aes(x = Date)) + 
-                geom_line(aes(y = as.character(cities$city_1))) +
-                labs(x = "Date", y = "PM2.5", title = paste("Air quality trend for", as.character(cities$city_1))) +
+        if (count == 1){
+            plot <- ggplot(df, aes_(x = as.name(names(df[1])), y = as.name(names(df[2])))) + 
+                geom_line() +
+                labs(x = "Date", y = "PM2.5", 
+                     title = paste("Air quality trend for", city_names[1])) +                        
                 scale_x_date(date_labels = "%b-%Y") +
-                xlim(x_slide) +
-                ylim(y_slide)                                                   # TODO: doesn't change axes when in the module vs in the server directly
-            
-        }, res = 96)) 
+                xlim(time_slide()) +
+                ylim(aq_slide())
+        } else {
+            melty_df <- melt(df, id = city_names) 
+            plot <- ggplot(melty_df, aes(Date, id)) + 
+                geom_line(aes(color = id, group = id)) +
+                labs(x = "Date", y = "PM2.5", title = paste("AQ trend for", city_names)) +                        
+                scale_x_date(date_labels = "%b-%Y") +
+                xlim(time_slide()) +
+                ylim(aq_slide())
+        }
+        
+        return(plot)
     })
 }
 
 # Implements teammate's microservice - takes PM2.5 value and returns text designation
 # using revised breakpoints from here: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/ 
-descriptionServer <- function(id, df){
+descriptionServer <- function(id, city_data, city_name){
     moduleServer(id, function(input, output, session){
 
-        pm25_avg <- round(mean(df$Boston, na.rm = TRUE), digits = 0)
+        pm25_avg <- round(mean(city_data, na.rm = TRUE), digits = 0)
         
         write(pm25_avg, "pm25_avg.txt")
         subprocess$run('py .\\Weather_goodinel_mod.py')
-        avg_desc <- readLines("response.txt")
+        avg_desc <- readLines("response.txt")                                   # TODO: fix incomplete final line warning
         
-        return( renderText(
-            paste("The average air quality for the full data set was:",         # TODO: format this better
+        return(paste("The average air quality for", city_name,"was",        
                   pm25_avg,", which is", avg_desc,".")
-            )
+            
         )
     })
 }
@@ -300,23 +334,60 @@ server <- function(input, output, session) {
                        layerId = city_names) 
     })
     
+    # Keep track of chosen cities for this session
     chosen_cities <- reactiveValues(city_1 = "", 
                                     city_2 = "", 
                                     city_3 = "", 
                                     count = 0)
+    
+    # Keep track of data loaded for this session
+    df <- reactiveValues(vals = NULL)
     
 #
 # --- EVENT HANDLERS ------------------------------
 #
     # Gather and render data from map click
     observeEvent(input$usa_map_marker_click,{
-        inputServer("usa_map_marker_click", input$usa_map_marker_click$id, chosen_cities)
-        
+        id <- "usa_map_marker_click"
+        results <- inputServer(id, input$usa_map_marker_click$id, 
+                               chosen_cities, df)
+        if (!is.null(results)){
+            df$vals <- results[[1]]
+            
+            # Associate description object with an output to render
+            output$avg_desc_1 <- renderText(results[[3]][1])
+            output$avg_desc_2 <- renderText(results[[4]][1])
+            output$avg_desc_3 <- renderText(results[[5]][1])
+            
+            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]][1], 
+                                                    chosen_cities$count,
+                                                    reactive(input$time_slide), 
+                                                    reactive(input$aq_slide))}, res = 96)
+            
+            change_page("trends")
+        } 
     })                                                                          
     
     # Gather and render data from user text input
     observeEvent(input$search,{
-        inputServer("search", input$text_location, chosen_cities)
+        id <- "search"
+        results <- inputServer(id, input$text_location, chosen_cities, df)
+        
+        if (!is.null(results)){
+            df$vals <- results[[1]]
+            
+            # Associate description object with an output to render
+            output$avg_desc_1 <- renderText(results[[3]][1])
+            output$avg_desc_2 <- renderText(results[[4]][1])
+            output$avg_desc_3 <- renderText(results[[5]][1])
+            
+            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]][1], 
+                                                    chosen_cities$count,
+                                                    reactive(input$time_slide), 
+                                                    reactive(input$aq_slide))}, res = 96)
+            
+            change_page("trends")
+        } 
     })
     
     # Start over with new search but confirm choice first 
