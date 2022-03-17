@@ -87,8 +87,8 @@ dash_page <- div(
                                                                                 # TODO: update range based on limits in data file unless doing a standard pull
             sliderInput("time_slide", "Time",
                         min = as.Date("2018-12-31"),
-                        max = as.Date("2022-01-01"),
-                        value = c(as.Date("2018-12-31"), as.Date("2022-01-01")), 
+                        max = as.Date("2022-03-01"),
+                        value = c(as.Date("2018-12-31"), as.Date("2022-03-01")), 
                         timeFormat = "%F"),
             
             sliderInput("aq_slide", "PM2.5",
@@ -138,7 +138,7 @@ inputServer <- function(id, city, chosen_cities, df){
         if (validateInputServer(id, city, chosen_cities) == TRUE){
             df_new <- dataSearchServer(id, city)
             
-            if (!is.null(dim(df_new))){
+            if (!is.null(df_new)){
                 
                 # Populate the reactive df or merge the new data with the old
                 if(is.null(dim(df$vals))){
@@ -151,16 +151,12 @@ inputServer <- function(id, city, chosen_cities, df){
                 
                 desc_1 <- descriptionServer(id, df$vals[,chosen_cities$city_1], chosen_cities$city_1)
                 if (chosen_cities$count == 3){
-                    cities <- c(as.character(chosen_cities$city_1), 
-                                as.character(chosen_cities$city_2), 
-                                as.character(chosen_cities$city_3))
-                    
+                    cities <- c(chosen_cities$city_1, chosen_cities$city_2, chosen_cities$city_3)
                     desc_3 <- descriptionServer(id, df$vals[,chosen_cities$city_3], chosen_cities$city_3)
                     desc_2 <- descriptionServer(id, df$vals[,chosen_cities$city_2], chosen_cities$city_2)
                     
                 } else if (chosen_cities$count == 2) { 
-                    cities <- c(as.character(chosen_cities$city_1), 
-                                as.character(chosen_cities$city_2))
+                    cities <- c(chosen_cities$city_1, chosen_cities$city_2)
                     desc_2 <- descriptionServer(id, df$vals[,chosen_cities$city_2], chosen_cities$city_2)
                     desc_3 <- ""
                     
@@ -221,8 +217,8 @@ dataSearchServer <- function(id, given_location){
     moduleServer(id, function(input, output, session){
         
         # Request data
- #       writeLines(as.character(given_location), "historic_aqi.txt")
- #       subprocess$run('py .\\get_historic_pm25.py')
+        writeLines(as.character(given_location), "historic_aqi.txt")
+        subprocess$run('py .\\get_historic_pm25.py')
         
         # Check if the request was successful
         confirm_request <- readLines("historic_aqi.txt")
@@ -250,7 +246,7 @@ dataSearchServer <- function(id, given_location){
             return(df)                                                          
         }
         
-        return(data.frame(matrix(ncol = 1, nrow = 0)))  # dummy data frame for unsuccessful request
+        return(NULL)  # unsuccessful request
     })
 }
 
@@ -270,23 +266,24 @@ updateCitiesServer <- function(id, chosen_cities, city){
     
     })
 }
-                                                                                # TODO: doesn't change axes when in the module vs in the server directly
+                                                                                
 # Render the given data frame                                                   
-plotServer <- function(id, df, city_names, count, time_slide, aq_slide){                       # TODO: add dynamic legend 
+plotServer <- function(id, df, city_names, count, time_slide, aq_slide){                       
     moduleServer(id, function(input, output, session){
         if (count == 1){
             plot <- ggplot(df, aes_(x = as.name(names(df[1])), y = as.name(names(df[2])))) + 
-                geom_line() +
+                geom_point() +
                 labs(x = "Date", y = "PM2.5", 
                      title = paste("Air quality trend for", city_names[1])) +                        
                 scale_x_date(date_labels = "%b-%Y") +
                 xlim(time_slide()) +
                 ylim(aq_slide())
         } else {
-            melty_df <- melt(df, id = city_names) 
-            plot <- ggplot(melty_df, aes(Date, id)) + 
-                geom_line(aes(color = id, group = id)) +
-                labs(x = "Date", y = "PM2.5", title = paste("AQ trend for", city_names)) +                        
+            melty_df <- melt(df, id = "Date") 
+            title <- paste(city_names, collapse = ", ")
+            plot <- ggplot(melty_df, aes(Date, value)) + 
+                geom_point(aes(color = variable, group = variable)) +
+                labs(x = "Date", y = "PM2.5", title = paste("AQ trend for", title)) +                       
                 scale_x_date(date_labels = "%b-%Y") +
                 xlim(time_slide()) +
                 ylim(aq_slide())
@@ -305,11 +302,10 @@ descriptionServer <- function(id, city_data, city_name){
         
         write(pm25_avg, "pm25_avg.txt")
         subprocess$run('py .\\Weather_goodinel_mod.py')
-        avg_desc <- readLines("response.txt")                                   # TODO: fix incomplete final line warning
+        avg_desc <- readLines("response.txt")                                   
         
         return(paste("The average air quality for", city_name,"was",        
                   pm25_avg,", which is", avg_desc,".")
-            
         )
     })
 }
@@ -351,6 +347,7 @@ server <- function(input, output, session) {
         id <- "usa_map_marker_click"
         results <- inputServer(id, input$usa_map_marker_click$id, 
                                chosen_cities, df)
+        
         if (!is.null(results)){
             df$vals <- results[[1]]
             
@@ -359,11 +356,10 @@ server <- function(input, output, session) {
             output$avg_desc_2 <- renderText(results[[4]][1])
             output$avg_desc_3 <- renderText(results[[5]][1])
             
-            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]][1], 
+            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]], 
                                                     chosen_cities$count,
                                                     reactive(input$time_slide), 
                                                     reactive(input$aq_slide))}, res = 96)
-            
             change_page("trends")
         } 
     })                                                                          
@@ -381,11 +377,10 @@ server <- function(input, output, session) {
             output$avg_desc_2 <- renderText(results[[4]][1])
             output$avg_desc_3 <- renderText(results[[5]][1])
             
-            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]][1], 
+            output$aqPlot <- renderPlot({plotServer(id, df$vals, results[[2]], 
                                                     chosen_cities$count,
                                                     reactive(input$time_slide), 
                                                     reactive(input$aq_slide))}, res = 96)
-            
             change_page("trends")
         } 
     })
@@ -422,6 +417,7 @@ server <- function(input, output, session) {
     
     # Go to the search page
     observeEvent(input$add_city,{
+        updateTextInput(session, "text_location", value = "")
         change_page("/")
     })
     
