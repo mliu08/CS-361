@@ -4,7 +4,6 @@
 # Winter 2022
 #
 # Author: Maggie Liu
-# Version: 1.1.0
 # Description: Provides historical PM2.5 data from the AQICN database on dbnomics for the requested city, as long as that city has data in the 57-city database.
 #
 
@@ -34,15 +33,15 @@ if __name__ == '__main__':
     
     # Get location request from a text file. Could be a zip code or US city.
     with open('historic_aqi.txt', 'r', encoding='UTF8') as infile:
-        location = infile.readline()
+        location = infile.readline().rstrip()
     infile.close()
 
     # Convert input to city name
     locator = geocoders.Nominatim(user_agent="historic_aqi_app") 
-    search =  locator.geocode(location, country_codes="us")
-
+    
     # Only continue if the text provided was a real place
-    if search is not None:
+    try:
+        search =  locator.geocode(location, country_codes="us")
         city = search.address.split(", ")                                                                   
         with open('cities.json', 'r', encoding='UTF8') as infile:
             db_cities = json.load(infile)
@@ -56,12 +55,11 @@ if __name__ == '__main__':
         else:
             # Write an an error message to the request file if the request was not in the database
             with open('historic_aqi.txt', 'w') as outfile:
-                outfile.write("Location not found.")
+                outfile.write("Location not found." + "\n")
             outfile.close()
-
-    else:
+    except:
         # Write an an error message to the request file if the request was not a city
         with open('historic_aqi.txt', 'w') as outfile:
-            outfile.write("Entry not recognized. Please check for typos.")
+            outfile.write("Entry not recognized. Please check for typos." + "\n")
         outfile.close()
     

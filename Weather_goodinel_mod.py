@@ -13,57 +13,58 @@ async def getweather():
     # declare the client. format defaults to metric system (celcius, km/h, etc.)
     client = python_weather.Client(format=python_weather.IMPERIAL)
 
-    location_exists = exists('location.txt')
-    aqi_exists = exists('current_aqi.txt')
+     # ---- commented out by maggie
+    # location_exists = exists('location.txt')
+    # aqi_exists = exists('current_aqi.txt')
 
-    if location_exists:
-        with open('location.txt', 'r') as c:
-            usr_input = c.read()
-            c.close()
-    else:
-        while not location_exists:
-            location_exists = exists('location.txt')
-            if location_exists:
-                # read incoming weather location request
-                with open('location.txt', 'r') as c:
-                    usr_input = c.read()
-                    c.close()
-            time.sleep(2)
+    # if location_exists:
+    #     with open('location.txt', 'r') as c:
+    #         usr_input = c.read()
+    #         c.close()
+    # else:
+    #     while not location_exists:
+    #         location_exists = exists('location.txt')
+    #         if location_exists:
+    #             # read incoming weather location request
+    #             with open('location.txt', 'r') as c:
+    #                 usr_input = c.read()
+    #                 c.close()
+    #         time.sleep(2)
 
 
-    print(usr_input)
+    #print(usr_input)
 
     # fetch a weather forecast from a city
-    weather = await client.find(usr_input)
-    print(f"Your location of interest is: " + weather.location_name)
-    print(f"your sky looks like" + weather.current.sky_text)
+    #weather = await client.find(usr_input)
+    #print(f"Your location of interest is: " + weather.location_name)
+    #print(f"your sky looks like" + weather.current.sky_text)
 
-    with open('weather.txt', 'w') as f:
-        f.write(str(weather.current.temperature))
+    #with open('weather.txt', 'w') as f:
+    #    f.write(str(weather.current.temperature))
 
-    if aqi_exists:
-        with open('current_aqi.txt', 'r') as b:
-            aqi = b.read()
-            b.close()
-        aqiStatement(int(aqi))
-    else:
-        while not aqi_exists:
-            aqi_exists = exists('current_aqi.txt')
-            if aqi_exists:
-                with open('current_aqi.txt', 'r') as b:
-                    aqi = b.read()
-                    b.close()
-                aqiStatement(int(aqi))
-                with open('aqi_response.txt', 'w') as f:
-                    f.write(aqiStatement(int(aqi)))
-                    f.close()
-            time.sleep(2)
+    # if aqi_exists:
+    #     with open('current_aqi.txt', 'r') as b:
+    #         aqi = b.read()
+    #         b.close()
+    #     aqiStatement(int(aqi))
+    # else:
+    #     while not aqi_exists:
+    #         aqi_exists = exists('current_aqi.txt')
+    #         if aqi_exists:
+    #             with open('current_aqi.txt', 'r') as b:
+    #                 aqi = b.read()
+    #                 b.close()
+    #             aqiStatement(int(aqi))
+    #             with open('aqi_response.txt', 'w') as f:
+    #                 f.write(aqiStatement(int(aqi)))
+    #                 f.close()
+    #         time.sleep(2)
 
 
-    print("you air quality index = ", aqi)
-    # returns the current day's forecast temperature (int)
-    print("your current weather = ", weather.current.temperature)
-    print(statement(weather.current.temperature))
+    # print("you air quality index = ", aqi)
+    # # returns the current day's forecast temperature (int)
+    # print("your current weather = ", weather.current.temperature)
+    # print(statement(weather.current.temperature))
 
     # ---- added by maggie
     with open('pm25_avg.txt', 'r') as infile:
@@ -82,7 +83,7 @@ async def getweather():
 
     # changed what writes to response.txt
     with open('response.txt' , 'w') as r:
-        r.write(desc)
+        r.write(desc + "\n")
     await client.close()
 
 
