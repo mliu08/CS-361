@@ -36,15 +36,13 @@ if __name__ == '__main__':
         location = infile.readline().rstrip()
     infile.close()
 
-    # Convert input to city name
     locator = geocoders.Nominatim(user_agent="historic_aqi_app") 
     
-    # Only continue if the text provided was a real place
     try:
         search =  locator.geocode(location, country_codes="us")
         city = search.address.split(", ")                                                                   
         with open('cities.json', 'r', encoding='UTF8') as infile:
-            db_cities = json.load(infile)
+            db_cities = json.load(infile)                            # needed to translate verified city name to AQICN city code
         infile.close()
 
         # Fetch and write data if the city is in the database  
@@ -60,6 +58,5 @@ if __name__ == '__main__':
     except:
         # Write an an error message to the request file if the request was not a city
         with open('historic_aqi.txt', 'w') as outfile:
-            outfile.write("Entry not recognized. Please check for typos." + "\n")
+            outfile.write("Entry not recognized." + "\n")
         outfile.close()
-    
