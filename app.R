@@ -47,7 +47,7 @@ search_page <- div(
         br(),
         
         # Map with pre-selected cities to choose from
-        leafletOutput('usa_map', width = "100%"),    # TODO: hover text / collapse definitions on pages. links to more info?
+        leafletOutput('usa_map', width = "100%"),    
         br(),
         br(),
         
@@ -132,6 +132,7 @@ ui <- fluidPage(
 #
 main_server <- function(id, city, chosen, df) {
     moduleServer(id, function(input, output, session) {
+        
         if (validate_input_server(id, city, chosen) == TRUE) {
             df_new <- fetch_data_server(id, city)
             
@@ -283,7 +284,7 @@ description_server <- function(id, city_data) {
         avg_desc <- readLines("response.txt")                                   
         
         return(paste("The average air quality for", colnames(city_data),"was", 
-                     pm25_avg,", which is", avg_desc,".")
+                     pm25_avg,"μg/m^3. This is", avg_desc,".")
         )
     })
 }
