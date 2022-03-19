@@ -39,7 +39,8 @@ search_page <- div(
         div(style ="font-size:10pt;",
           "TIP: Not every city has data available", 
           conditionalPanel(
-              condition = "input.add_city != 0",
+              condition = "(input.add_city - input.back_to_trend 
+                            + input.confirm_new) % 2 != 0",
               style ="font-size:10pt;",
               "TIP: Comparing more than 2 cities at once may make trends 
               difficult to read.")
@@ -64,7 +65,8 @@ search_page <- div(
                                 width = NULL)),
             
             column(2, style = "margin-top:30px;",
-                   conditionalPanel(condition = "input.add_city != 0",
+                   conditionalPanel(condition = "(input.add_city - input.back_to_trend 
+                                                + input.confirm_new) % 2 != 0",
                                        actionButton("back_to_trend", 
                                                     label = "Go Back", 
                                                     icon = NULL, 
@@ -102,7 +104,7 @@ dash_page <- div(
             plotOutput("aq_plot"),
             br(),
             br(),
-            textOutput("avg_desc_1"),                                              # TODO: format this better
+            textOutput("avg_desc_1"),                                            
             textOutput("avg_desc_2"),
             textOutput("avg_desc_3")
         )
@@ -148,19 +150,22 @@ main_server <- function(id, city, chosen, df) {
                 update_city_list_server(id, chosen, city)
                 
                 # Prepare text output to be rendered in the main server
-                desc_1 <- description_server(id, df$vals[, chosen$city_1])
+                desc_1 <- description_server(id, df$vals[, chosen$city_1], 
+                                             chosen$city_1)
                 cities <- c(chosen$city_1)
                 desc_2 <- ""
                 desc_3 <- ""
                 
                 if (chosen$city_2 != "") { 
                     cities <- c(chosen$city_1, chosen$city_2)
-                    desc_2 <- description_server(id, df$vals[, chosen$city_2])
+                    desc_2 <- description_server(id, df$vals[, chosen$city_2], 
+                                                 chosen$city_2)
                 }
                 
                 if (chosen$city_3 != "") {
                     cities <- c(chosen$city_1, chosen$city_2, chosen$city_3)
-                    desc_3 <- description_server(id, df$vals[, chosen$city_3])
+                    desc_3 <- description_server(id, df$vals[, chosen$city_3], 
+                                                 chosen$city_3)
                 }
 
                 return(list(df$vals, cities, desc_1, desc_2, desc_3))
@@ -263,7 +268,7 @@ plot_server <- function(id, df, city_names, time_slide, aq_slide) {
         plot <- ggplot(melty_df, aes(Date, value)) + 
             geom_point(aes(color = variable, group = variable)) +
             labs(x = "Date", y = "PM2.5", 
-                 title = paste("AQ trend for", places), color = "City") +                       
+                 title = paste("Air Quality in", places), color = "City") +                       
             scale_x_date(date_labels = "%b-%Y") +
             xlim(time_slide()) +
             ylim(aq_slide())
@@ -274,7 +279,7 @@ plot_server <- function(id, df, city_names, time_slide, aq_slide) {
 
 # Uses teammate's microservice to take PM2.5 value and return text description.
 # Breakpoints from: https://aqicn.org/faq/2013-09-09/revised-pm25-aqi-breakpoints/ 
-description_server <- function(id, city_data) {
+description_server <- function(id, city_data, city) {
     moduleServer(id, function(input, output, session) {
 
         pm25_avg <- round(mean(city_data, na.rm = TRUE), digits = 0)
@@ -282,8 +287,8 @@ description_server <- function(id, city_data) {
         write(pm25_avg, "pm25_avg.txt")
         subprocess$run('py .\\Weather_goodinel_mod.py')
         avg_desc <- readLines("response.txt")                                   
-        
-        return(paste("The average air quality for", colnames(city_data),"was", 
+
+        return(paste("The average air quality for", city,"was", 
                      pm25_avg,"μg/m^3. This is", avg_desc,".")
         )
     })
@@ -371,22 +376,25 @@ server <- function(input, output, session) {
             footer = tagList(modalButton("Cancel"),
                              actionButton("confirm_new", "Confirm new search")))
         )
+    })
+    
+    # Clear values and change page if new search confirmed
+    observeEvent(input$confirm_new, {
+        updateTextInput(session, "text_location", value = "")
         
-        # Clear values and change page if new search confirmed
-        observeEvent(input$confirm_new, {
-            updateTextInput(session, "text_location", value = "")
-            change_page("/")
-            
-            chosen$city_1 <- ""
-            chosen$city_2 <- ""
-            chosen$city_3 <- ""
-            
-            updateSliderInput(session, "time_slide", 
-                              value = c(as.Date("2018-12-31"), 
-                                        as.Date("2022-01-01")))
-            updateSliderInput(session, "aq_slide", value = c(0, 300))
-            removeModal()
-        })
+        chosen$city_1 <- ""
+        chosen$city_2 <- ""
+        chosen$city_3 <- ""
+        
+        df$vals <- NULL
+        
+        updateSliderInput(session, "time_slide", 
+                          value = c(as.Date("2018-12-31"), 
+                                    as.Date("2022-03-01")))
+        updateSliderInput(session, "aq_slide", value = c(0, 300))
+        
+        change_page("/")
+        removeModal()
     })
     
     # Go to the search page
