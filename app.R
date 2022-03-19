@@ -39,8 +39,7 @@ search_page <- div(
         div(style ="font-size:10pt;",
           "TIP: Not every city has data available", 
           conditionalPanel(
-              condition = "(input.add_city - input.back_to_trend 
-                            + input.confirm_new) % 2 != 0",
+              condition = "(input.add_city - input.back_to_trend) % 2 != 0",
               style ="font-size:10pt;",
               "TIP: Comparing more than 2 cities at once may make trends 
               difficult to read.")
@@ -65,8 +64,8 @@ search_page <- div(
                                 width = NULL)),
             
             column(2, style = "margin-top:30px;",
-                   conditionalPanel(condition = "(input.add_city - input.back_to_trend 
-                                                + input.confirm_new) % 2 != 0",
+                   conditionalPanel(condition = "(input.add_city - 
+                                    input.back_to_trend) % 2 != 0",
                                        actionButton("back_to_trend", 
                                                     label = "Go Back", 
                                                     icon = NULL, 
